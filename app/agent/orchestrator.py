@@ -23,6 +23,7 @@ from app.booking.registry import connector_for
 from app.booking.service import BookingService
 from app.config import Settings
 from app.errors import Unavailable
+from app.knowledge.fallback import match_facts
 from app.knowledge.service import KnowledgeService
 from app.models import Conversation, Message, Property, Turn
 from app.providers import Providers
@@ -260,10 +261,21 @@ class TurnRunner:
                 mark("first_sentence_ms")
                 yield {"type": "sentence", "text": sentence}
         except Unavailable as exc:
-            fallback = lang.localized(lang.UNAVAILABLE, guest_lang)
-            yield {"type": "error", "detail": fallback}
-            answer = answer or fallback
             meta["error"] = "provider_unavailable" + (f" (HTTP {exc.upstream_status})" if exc.upstream_status else "")
+            matched = match_facts(text, facts) if not answer.strip() else []
+            if matched:
+                # Model down: answer common questions verbatim from approved facts, with their ids
+                # so the audit shows where the answer came from.
+                answer = " ".join(f"{f['content']} [{f['id']}]" for f in matched)
+                shown = " ".join(f["content"] for f in matched)
+                yield {"type": "delta", "text": shown}
+                for sentence in SentenceChunker().feed(shown + " ") + chunker.flush():
+                    yield {"type": "sentence", "text": sentence}
+                meta["fallback"] = "approved_facts"
+            else:
+                fallback = lang.localized(lang.UNAVAILABLE, guest_lang)
+                yield {"type": "error", "detail": fallback}
+                answer = answer or fallback
 
         # Booking intent but no search yet: offer the structured form instead of a text interview.
         called = {t["name"] for t in tool_log}

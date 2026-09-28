@@ -455,5 +455,25 @@ def test_message_language_beats_widget_ui_language(client):
 
     conv, h = start(client, language="en")
     client.app.state.providers.stream_chat = broken
-    r = client.post(f"/v1/conversations/{conv}/messages", json={"text": "هل يوجد موقف سيارات؟", "language": "en"}, headers=h)
+    r = client.post(f"/v1/conversations/{conv}/messages", json={"text": "هل تقبلون العملات الرقمية؟", "language": "en"}, headers=h)
     assert "عذراً" in r.text  # Arabic fallback although the UI language is English
+
+
+def test_model_down_answers_common_questions_from_approved_facts(client):
+    from app.errors import Unavailable
+
+    async def down(messages, tools=None):
+        raise Unavailable("down", upstream_status=None)
+        yield  # pragma: no cover
+
+    client.app.state.providers.stream_chat = down
+    conv, h = start(client, language="ar")
+    events = send(client, conv, h, "متى موعد الوصول والمغادرة؟")
+    text = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert "14:00" in text and "12:00" in text and "عذراً" not in text  # Arabic approved facts
+    detail = client.get(f"/v1/staff/conversations/{conv}", headers={"X-API-Key": DEMO_KEYS["atlas"]}).json()
+    ai = detail["messages"][-1]
+    assert ai["meta"]["fallback"] == "approved_facts" and "F:check_in" in ai["audit"]["sources"]
+    # Unknown question still gets the honest "team can help" message.
+    events = send(client, conv, h, "Can you recommend a nightclub?")
+    assert events[0]["type"] == "error"
