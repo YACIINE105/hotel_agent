@@ -57,9 +57,9 @@ async def seed(session: AsyncSession) -> None:
     session.add_all([atlas_org, oran_org])
     await session.flush()
     atlas = Property(org_id=atlas_org.id, slug="atlas-bay", name="Atlas Bay Hotel", timezone="Africa/Algiers",
-                     currency="DZD", languages=["en", "ar", "fr"], connector={"type": "fake", "rooms": ATLAS_ROOMS})
+                     currency="DZD", languages=["en", "ar", "fr"], connector={"type": "fake", "rooms": ATLAS_ROOMS, "city_tax_per_adult_night": "200"})
     oran = Property(org_id=oran_org.id, slug="oran-medina", name="Oran Medina Suites", timezone="Africa/Algiers",
-                    currency="DZD", languages=["en", "fr"], connector={"type": "fake", "rooms": ATLAS_ROOMS[:1]})
+                    currency="DZD", languages=["en", "fr"], connector={"type": "fake", "rooms": ATLAS_ROOMS[:1], "city_tax_per_adult_night": "200"})
     session.add_all([atlas, oran])
     await session.flush()
     for prop, facts in ((atlas, ATLAS_FACTS), (oran, ORAN_FACTS)):

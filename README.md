@@ -63,13 +63,13 @@ POST /bookings/confirm  ◄── the only booking path: an explicit guest click
 
 Measured locally with an RTX 3060 laptop GPU, Kokoro on CPU, and kimi-k3 via OpenRouter with `LLM_REASONING=off`:
 
-| | End of speech → |
-|---|---|
-| Transcript | ~1.3 s |
-| First sentence | ~2.6 s |
-| **First audio** | **~2.7 s** |
+| End of speech → | API client (`smoke_live.py`) | Real browser, fake mic (`smoke_voice_browser.py`) |
+|---|---|---|
+| Transcript | ~1.3 s | ~1.0 s |
+| First sentence | ~2.6 s | ~3.2 s |
+| **First audio** | **~2.7 s** | **~4.0 s** |
 
-Most of the remaining delay is the model's first token. Setting `LLM_REASONING=off` halved it for kimi-k3 (2.3 s → 1.0 s in `bench_models.py`). `deepseek/deepseek-v4.1-flash` measured 0.8 s with correct tool calls.
+Run-to-run variation is dominated by the model's first token through OpenRouter (1–3 s). Most of the remaining delay is the model's first token. Setting `LLM_REASONING=off` halved it for kimi-k3 (2.3 s → 1.0 s in `bench_models.py`). `deepseek/deepseek-v4.1-flash` measured 0.8 s with correct tool calls.
 
 ### Safety properties covered by tests
 

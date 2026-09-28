@@ -67,6 +67,7 @@ class FakeReservationConnector:
         self.store = _STORES.setdefault(
             property_id, _Inventory(rooms=options.get("rooms", DEFAULT_ROOMS))
         )
+        self.city_tax = Decimal(str(options.get("city_tax_per_adult_night", CITY_TAX_PER_ADULT_NIGHT)))
 
     def _fault(self, name: str) -> bool:
         if name in self.store.faults:
@@ -86,7 +87,7 @@ class FakeReservationConnector:
             nightly = (nightly * Decimal("0.90")).quantize(CENT)
         total = (nightly * q.nights).quantize(CENT)
         taxes = (total - total / (1 + VAT_RATE)).quantize(CENT)
-        city_tax = (CITY_TAX_PER_ADULT_NIGHT * q.adults * q.nights).quantize(CENT)
+        city_tax = (self.city_tax * q.adults * q.nights).quantize(CENT)
         if plan == "FLEX":
             deadline = datetime.combine(q.check_in - timedelta(days=2), time(15, 0), self.tz)
             cancel = CancellationPolicy(

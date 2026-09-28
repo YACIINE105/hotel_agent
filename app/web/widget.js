@@ -10,7 +10,7 @@
   const STORE_KEY = `hotel-agent:${HOTEL}`;
 
   const T = {
-    en: { placeholder: "Ask about rooms, services, or your booking…", send: "Send", choose: "Choose",
+    en: { dates: "Dates", guests: "Guests", meals: "Meals", payment: "Payment", cancellation: "Cancellation", placeholder: "Ask about rooms, services, or your booking…", send: "Send", choose: "Choose",
       confirm: "Confirm booking", confirming: "Confirming…", total: "Total", payAtHotel: "Payable at the hotel",
       refundable: "Free cancellation", nonRefundable: "Non-refundable", nights: "nights", left: "left",
       confirmed: "Booking confirmed", reference: "Reference", listening: "Listening…", thinking: "Thinking…",
@@ -18,7 +18,7 @@
       priceChanged: "The price changed. Please review the updated summary.", failed: "Booking not completed",
       review: "Staff will verify your booking", chose: "I'd like the {room} ({rate}).", guest: "Guest",
       micDenied: "Microphone unavailable. Use localhost or HTTPS and allow microphone access.", speaking: "Speaking…" },
-    fr: { placeholder: "Chambres, services ou votre réservation…", send: "Envoyer", choose: "Choisir",
+    fr: { dates: "Dates", guests: "Voyageurs", meals: "Repas", payment: "Paiement", cancellation: "Annulation", placeholder: "Chambres, services ou votre réservation…", send: "Envoyer", choose: "Choisir",
       confirm: "Confirmer la réservation", confirming: "Confirmation…", total: "Total", payAtHotel: "À payer à l'hôtel",
       refundable: "Annulation gratuite", nonRefundable: "Non remboursable", nights: "nuits", left: "restantes",
       confirmed: "Réservation confirmée", reference: "Référence", listening: "J'écoute…", thinking: "Réflexion…",
@@ -26,7 +26,7 @@
       priceChanged: "Le prix a changé. Vérifiez le nouveau récapitulatif.", failed: "Réservation non effectuée",
       review: "Notre équipe va vérifier votre réservation", chose: "Je souhaite la {room} ({rate}).", guest: "Client",
       micDenied: "Micro indisponible. Utilisez localhost ou HTTPS et autorisez le micro.", speaking: "Réponse…" },
-    ar: { placeholder: "اسأل عن الغرف أو الخدمات أو حجزك…", send: "إرسال", choose: "اختيار",
+    ar: { dates: "التواريخ", guests: "الضيوف", meals: "الوجبات", payment: "الدفع", cancellation: "الإلغاء", placeholder: "اسأل عن الغرف أو الخدمات أو حجزك…", send: "إرسال", choose: "اختيار",
       confirm: "تأكيد الحجز", confirming: "جارٍ التأكيد…", total: "المجموع", payAtHotel: "يدفع في الفندق",
       refundable: "إلغاء مجاني", nonRefundable: "غير قابل للاسترداد", nights: "ليالٍ", left: "متبقية",
       confirmed: "تم تأكيد الحجز", reference: "رقم الحجز", listening: "أستمع…", thinking: "أفكر…",
@@ -150,13 +150,13 @@
     box.append(el("strong", null, q.room_name + " · " + q.rate_plan));
     const dl = el("dl");
     const row = (k, v) => dl.append(el("dt", null, k), el("dd", null, v));
-    row("📅", `${date(q.check_in)} → ${date(q.check_out)}`);
-    row("👥", `${q.adults}` + (q.children_ages.length ? ` + ${q.children_ages.join(", ")}` : ""));
-    row("🍳", q.meal_plan);
+    row(t.dates, `${date(q.check_in)} → ${date(q.check_out)}`);
+    row(t.guests, `${q.adults}` + (q.children_ages.length ? ` + ${q.children_ages.join(", ")}` : ""));
+    row(t.meals, q.meal_plan);
     row(t.total, money(q.total, q.currency));
     if (Number(q.pay_at_property_fees)) row(t.payAtHotel, money(q.pay_at_property_fees, q.currency));
-    row("💳", q.payment_timing);
-    row("↩", q.cancellation.description);
+    row(t.payment, q.payment_timing);
+    row(t.cancellation, q.cancellation.description);
     row(t.guest, `${q.guest.first_name} ${q.guest.last_name} · ${q.guest.email}`);
     box.append(dl);
     const b = el("button", null, t.confirm);
@@ -212,7 +212,7 @@
         break;
       case "audio": voice.play(e); break;
       case "interrupted": clearStatus(); aiBubble = null; break;
-      case "turn_end": state.busy = false; clearStatus(); break;
+      case "turn_end": state.busy = false; clearStatus(); drain(); break;
     }
   }
 
@@ -258,9 +258,13 @@
     state.poll = setInterval(() => catchUp(false).catch(() => {}), 4000);
   }
 
+  const queue = [];
+  function drain() { if (!state.busy && queue.length) send(queue.shift()); }
+
   async function send(text) {
     text = text.trim();
-    if (!text || state.busy) return;
+    if (!text) return;
+    if (state.busy) { queue.push(text); return; }  // sent when the current reply finishes
     await ensureSession();
     add(el("div", "msg guest", text.replace(/\s*\[[A-Z]+:[^\]]+\]$/, ""))).dir = "auto";  // local echo at 0 ms
     state.busy = true; aiBubble = null;
@@ -286,6 +290,7 @@
       }
     } catch (e) { clearStatus(); add(el("div", "system", e.message)); }
     state.busy = false;
+    drain();
   }
 
   // ---------- voice: VAD capture -> WAV -> WS; in-order gapless playback; barge-in ----------
@@ -397,5 +402,5 @@
   langSel.onchange = () => { applyLang(langSel.value); store.set({ conv: state.conv, token: state.token, lang: state.lang, voiceLangs: state.voiceLangs }); };
   voiceBtn.onclick = () => (voice.active ? voice.stop() : voice.start());
   if (script.dataset.open === "true") $(".launcher").click();
-  window.HotelAgent = { open: () => panel.classList.add("open"), send };
+  window.HotelAgent = { open: () => panel.classList.add("open"), send, get busy() { return state.busy || queue.length > 0; } };
 })();
