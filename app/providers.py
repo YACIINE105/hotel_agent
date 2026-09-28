@@ -4,6 +4,7 @@ One pooled httpx client per process keeps connections warm; errors never expose 
 """
 
 import json
+import logging
 import math
 from collections.abc import AsyncIterator
 
@@ -11,6 +12,22 @@ import httpx
 
 from app.config import Settings
 from app.errors import Unavailable
+
+log = logging.getLogger("hotel_agent.providers")
+
+
+async def _explain(exc: Exception) -> int | None:
+    """Log why a provider call failed (status + short body; never headers/keys)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            await exc.response.aread()
+            body = exc.response.text[:300]
+        except Exception:
+            body = ""
+        log.warning("provider %s -> HTTP %s: %s", exc.request.url.path, exc.response.status_code, body)
+        return exc.response.status_code
+    log.warning("provider call failed: %r", exc)
+    return None
 
 
 class Providers:
@@ -27,7 +44,7 @@ class Providers:
             response.raise_for_status()
             return response
         except httpx.HTTPError as exc:
-            raise Unavailable("External provider request failed") from exc
+            raise Unavailable("External provider request failed", upstream_status=await _explain(exc)) from exc
 
     async def stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[tuple]:
         """Yields ("text", str), then ("tool_calls", [...]) if the model called tools."""
@@ -56,6 +73,8 @@ class Providers:
                 json=body,
                 timeout=self.s.llm_timeout_seconds,
             ) as response:
+                if response.status_code >= 400:
+                    await response.aread()  # keep the error body readable for logging
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line.startswith("data:"):
@@ -82,7 +101,7 @@ class Providers:
                         if choice.get("finish_reason"):
                             finished = True
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-            raise Unavailable("The text model stream failed") from exc
+            raise Unavailable("The text model stream failed", upstream_status=await _explain(exc)) from exc
         if not finished:
             raise Unavailable("The text model stream ended early")
         if calls:

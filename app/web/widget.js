@@ -204,7 +204,11 @@
       case "handoff": state.paused = true; add(el("div", "system", t.handoff)); startPolling(); break;
       case "paused": clearStatus(); state.paused = true; add(el("div", "msg ai", e.text)); startPolling(); break;
       case "error": clearStatus(); add(el("div", "msg ai", e.detail)); break;
-      case "transcript": clearStatus(); if (e.text) add(el("div", "msg guest", e.text)).dir = "auto"; setStatus(t.thinking); break;
+      case "transcript":
+        clearStatus();
+        if (e.rejected) break;  // noise; the server replies with a localized "please repeat"
+        if (e.text) add(el("div", "msg guest", e.text)).dir = "auto";
+        setStatus(t.thinking); break;
       case "done":
         clearStatus(); aiBubble = null; state.busy = false;
         if (e.message_id) state.lastId = Math.max(state.lastId, e.message_id);
@@ -296,7 +300,7 @@
   // ---------- voice: VAD capture -> WAV -> WS; in-order gapless playback; barge-in ----------
   const voice = {
     active: false, ws: null, ctx: null, playCtx: null, stream: null, proc: null, sources: [], nextAt: 0,
-    speaking: false, frames: [], preroll: [], voiced: 0, silence: 0, rate: 16000,
+    speaking: false, frames: [], preroll: [], voiced: 0, speech: 0, silence: 0, rate: 16000,
 
     async start() {
       await ensureSession();
@@ -333,13 +337,13 @@
       const rms = Math.sqrt(sum / f.length);
       meter.style.width = Math.min(100, rms * 600) + "%";
       const playing = this.sources.length > 0;
-      const threshold = playing ? 0.06 : 0.018;  // higher while the agent talks, to ignore echo
+      const threshold = playing ? 0.08 : 0.025;  // higher while the agent talks, to ignore echo
       const frameMs = (f.length / this.rate) * 1000;
-      if (rms > threshold) { this.voiced += frameMs; this.silence = 0; } else { this.silence += frameMs; if (!this.frames.length) this.voiced = 0; }
+      if (rms > threshold) { this.voiced += frameMs; this.speech += frameMs; this.silence = 0; } else { this.silence += frameMs; if (!this.frames.length) this.voiced = 0; }
       if (!this.frames.length) {
         this.preroll.push(f); if (this.preroll.length > 12) this.preroll.shift();
-        if (this.voiced >= 120) {
-          this.frames = this.preroll.splice(0);
+        if (this.voiced >= 250) {
+          this.frames = this.preroll.splice(0); this.speech = this.voiced;
           if (playing || state.busy) { this.stopPlayback(); this.ws?.send(JSON.stringify({ type: "interrupt" })); }  // barge-in
           setStatus(t.listening);
         }
@@ -351,8 +355,8 @@
     },
 
     flush() {
-      const frames = this.frames; this.frames = []; this.voiced = 0; this.silence = 0;
-      if (frames.length * (1024 / this.rate) < 0.35) return;  // too short: noise
+      const frames = this.frames, speech = this.speech; this.frames = []; this.voiced = 0; this.silence = 0; this.speech = 0;
+      if (speech < 400) { setStatus(t.listening); return; }  // under 0.4 s of actual speech: noise or a cough
       const wav = encodeWav(frames, this.rate);
       if (this.ws?.readyState === 1) {
         this.ws.send(wav);

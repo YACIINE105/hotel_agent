@@ -114,6 +114,7 @@
           const a = m.audit, tm = a.timings || {};
           n.append(el("div", "audit", `sources: ${a.sources.join(", ") || "—"} · tools: ${a.tools.map((x) => x.name + (x.ok ? "" : "✗")).join(", ") || "—"} · first token ${tm.first_token_ms ?? "–"} ms · total ${tm.total_ms ?? "–"} ms`));
         }
+        if (m.meta?.error) n.append(el("div", "audit", `⚠ ${m.meta.error}`));
         if (m.meta?.offers) n.append(el("div", "audit", `offers: ${m.meta.offers.map((o) => `${o.room_name} ${o.total} ${o.currency}`).join(" | ")}`));
         t.append(n);
       }

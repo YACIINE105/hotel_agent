@@ -32,6 +32,10 @@ class Unavailable(AppError):
 
     status_code, code = 503, "provider_unavailable"
 
+    def __init__(self, detail: str, *, upstream_status: int | None = None):
+        super().__init__(detail)
+        self.upstream_status = upstream_status
+
 
 async def handle_app_error(_: Request, exc: AppError):
     return JSONResponse({"code": exc.code, "detail": exc.detail}, status_code=exc.status_code)

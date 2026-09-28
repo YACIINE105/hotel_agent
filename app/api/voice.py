@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.agent import language as lang
 from app.agent.orchestrator import TurnRunner
 from app.api.deps import guest_context
 from app.errors import AppError, Unavailable
@@ -28,7 +29,8 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
     settings, providers = app.state.settings, app.state.providers
     async with app.state.sessionmaker() as session:
         try:
-            await guest_context(session, settings, conversation_id, token)
+            prop, conv = await guest_context(session, settings, conversation_id, token)
+            languages, conv_language = list(prop.languages), conv.language
         except AppError:
             await ws.close(code=4403)
             return
@@ -107,9 +109,14 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
                 except Unavailable:
                     await send({"type": "error", "detail": "Speech recognition is unavailable"})
                     continue
+                if not lang.plausible_transcript(text, languages):
+                    # Likely noise or echo: do not bother the model, ask the guest to repeat.
+                    await send({"type": "transcript", "text": text, "rejected": True})
+                    await send({"type": "error", "detail": lang.localized(lang.NOT_UNDERSTOOD, conv_language)})
+                    await send({"type": "turn_end"})
+                    continue
                 await send({"type": "transcript", "text": text})
-                if text:
-                    turn = asyncio.create_task(run_turn(text))
+                turn = asyncio.create_task(run_turn(text))
             elif kind == "text" and str(data.get("text", "")).strip():
                 await cancel_turn()
                 turn = asyncio.create_task(run_turn(str(data["text"])[:2000]))

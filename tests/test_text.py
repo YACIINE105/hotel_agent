@@ -49,3 +49,16 @@ def test_split_sections_keeps_paragraphs():
     text = "A" * 500 + "\n\n" + "B" * 500 + "\n\nshort"
     chunks = split_sections(text, limit=900)
     assert chunks[0] == "A" * 500 and chunks[1].startswith("B" * 500)
+
+
+def test_noise_transcripts_are_rejected():
+    from app.agent.language import plausible_transcript
+
+    langs = ["en", "ar", "fr"]
+    assert not plausible_transcript("เอ่ออัน", langs)
+    assert not plausible_transcript("好，Q。", langs)
+    assert not plausible_transcript("Ah", langs)
+    assert plausible_transcript("Ah, ok.", langs)
+    assert plausible_transcript("Hi, can I know if you have an available room for tonight?", langs)
+    assert plausible_transcript("هل يوجد موقف سيارات؟", langs)
+    assert not plausible_transcript("هل يوجد موقف سيارات؟", ["en", "fr"])

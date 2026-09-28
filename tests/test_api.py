@@ -289,3 +289,37 @@ def test_voice_skips_audio_for_unsupported_tts_language(client):
         while (m := ws.receive_json())["type"] != "turn_end":
             msgs.append(m)
     assert spoken == [] and any(m["type"] == "sentence" for m in msgs)
+
+
+def test_voice_noise_transcript_does_not_reach_model(client):
+    providers = client.app.state.providers
+
+    async def transcribe(audio, filename, content_type):
+        return "好，Q。"
+
+    providers.transcribe = transcribe
+    llm = script(client, [])
+    conv, h = start(client)
+    token = h["Authorization"].split()[1]
+    with client.websocket_connect(f"/v1/conversations/{conv}/voice?token={token}") as ws:
+        ws.send_bytes(b"noise")
+        ws.send_json({"type": "utterance_end", "mime": "audio/wav"})
+        msgs = []
+        while (m := ws.receive_json())["type"] != "turn_end":
+            msgs.append(m)
+    assert msgs[0]["rejected"] is True and "didn't catch" in msgs[1]["detail"]
+    assert llm.requests == []
+
+
+def test_provider_status_is_recorded_for_staff(client):
+    from app.errors import Unavailable
+
+    async def broke(messages, tools=None):
+        raise Unavailable("down", upstream_status=402)
+        yield  # pragma: no cover
+
+    client.app.state.providers.stream_chat = broke
+    conv, h = start(client)
+    send(client, conv, h, "hello")
+    detail = client.get(f"/v1/staff/conversations/{conv}", headers={"X-API-Key": DEMO_KEYS["atlas"]}).json()
+    assert detail["messages"][-1]["meta"]["error"] == "provider_unavailable (HTTP 402)"

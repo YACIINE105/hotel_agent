@@ -204,11 +204,11 @@ class TurnRunner:
             for sentence in chunker.feed(tail) + chunker.flush():
                 mark("first_sentence_ms")
                 yield {"type": "sentence", "text": sentence}
-        except Unavailable:
+        except Unavailable as exc:
             fallback = lang.localized(lang.UNAVAILABLE, guest_lang)
             yield {"type": "error", "detail": fallback}
             answer = answer or fallback
-            meta["error"] = "provider_unavailable"
+            meta["error"] = "provider_unavailable" + (f" (HTTP {exc.upstream_status})" if exc.upstream_status else "")
 
         known = {f["id"] for f in facts} | {d["id"] for d in documents}
         used = citations(answer)

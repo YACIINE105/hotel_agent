@@ -55,3 +55,31 @@ def detect(text: str) -> str:
 
 def localized(table: dict, lang: str | None) -> str:
     return table.get(lang or "en", table["en"])
+
+
+NOT_UNDERSTOOD = {
+    "en": "Sorry, I didn't catch that. Could you say it again?",
+    "ar": "عذراً، لم أفهم ذلك جيداً. هل يمكنك الإعادة؟",
+    "fr": "Désolé, je n'ai pas bien compris. Pouvez-vous répéter ?",
+}
+
+
+def _script(ch: str) -> str | None:
+    code = ord(ch)
+    if code < 0x250:
+        return "latin"
+    if 0x600 <= code <= 0x6FF or 0x750 <= code <= 0x77F or 0xFB50 <= code <= 0xFEFF:
+        return "arabic"
+    return None
+
+
+def plausible_transcript(text: str, languages: list[str]) -> bool:
+    """ASR on background noise often yields short text in a random language (Thai, Chinese...).
+
+    Accept only transcripts with enough letters, mostly in scripts the hotel's languages use.
+    """
+    allowed = {"arabic" if code == "ar" else "latin" for code in languages} | {"latin"}
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 3:
+        return False
+    return sum(_script(c) in allowed for c in letters) / len(letters) >= 0.8
