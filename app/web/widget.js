@@ -535,7 +535,7 @@
       case "error": clearStatus(); bubble("ai", e.detail); break;
       case "transcript":
         clearStatus();
-        if (e.rejected) break;  // noise; the server replies with a localized "please repeat"
+        if (e.rejected) { voice.duck(false); break; }  // noise: restore the agent's voice
         if (e.text) bubble("guest", e.text);
         setStatus(t.thinking); break;
       case "done":
@@ -544,7 +544,7 @@
         if (e.language && e.language !== state.lang && T[e.language] && state.languages.includes(e.language)) { applyLang(e.language); save(); }
         break;
       case "audio": voice.play(e); break;
-      case "interrupted": clearStatus(); aiBubble = null; break;
+      case "interrupted": clearStatus(); aiBubble = null; voice.stopPlayback(); break;
       case "turn_end": state.busy = false; clearStatus(); drain(); break;
     }
   }
@@ -653,6 +653,8 @@
       this.ctx = new AudioContext({ sampleRate: 16000 });
       this.rate = this.ctx.sampleRate;
       this.playCtx = new AudioContext();
+      this.gain = this.playCtx.createGain();
+      this.gain.connect(this.playCtx.destination);
       const src = this.ctx.createMediaStreamSource(this.stream);
       this.proc = this.ctx.createScriptProcessor(1024, 1, 1);
       this.proc.onaudioprocess = (ev) => this.onFrame(new Float32Array(ev.inputBuffer.getChannelData(0)));
@@ -691,7 +693,9 @@
         this.preroll.push(f); if (this.preroll.length > 12) this.preroll.shift();
         if (this.voiced >= 250) {
           this.frames = this.preroll.splice(0); this.speech = this.voiced;
-          if (playing || state.busy) { this.stopPlayback(); this.ws?.send(JSON.stringify({ type: "interrupt" })); }  // barge-in
+          // Barge-in: duck the agent's voice now; the server stops the answer only if this turns
+          // out to be real speech (then an "interrupted" event arrives), so noise can't cut answers.
+          if (playing) this.duck(true);
           setStatus(t.listening);
         }
         return;
@@ -706,7 +710,7 @@
       const wav = encodeWav(frames, this.rate);
       if (this.ws?.readyState === 1) {
         this.ws.send(wav);
-        this.ws.send(JSON.stringify({ type: "utterance_end", mime: "audio/wav" }));
+        this.ws.send(JSON.stringify({ type: "utterance_end", mime: "audio/wav", language: state.lang }));
         state.busy = true; setStatus(t.thinking);
       }
     },
@@ -720,7 +724,7 @@
       try { buffer = await this.playCtx.decodeAudioData(bytes.buffer); } catch { return; }
       if (!this.active) return;
       const node = this.playCtx.createBufferSource();
-      node.buffer = buffer; node.connect(this.playCtx.destination);
+      node.buffer = buffer; node.connect(this.gain);
       const at = Math.max(this.playCtx.currentTime + 0.02, this.nextAt);  // queue gaplessly, in order
       node.start(at); this.nextAt = at + buffer.duration;
       this.sources.push(node);
@@ -730,6 +734,11 @@
     stopPlayback() {
       for (const s of this.sources) { try { s.stop(); } catch {} }
       this.sources = []; this.nextAt = 0;
+      this.duck(false);
+    },
+
+    duck(on) {
+      if (this.gain && this.playCtx) this.gain.gain.setTargetAtTime(on ? 0.15 : 1, this.playCtx.currentTime, 0.05);
     },
   };
 

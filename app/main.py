@@ -21,8 +21,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 def create_app(settings: Settings | None = None, client: httpx.AsyncClient | None = None) -> FastAPI:
     settings = settings or get_settings()
+    if not settings.session_secret.strip():
+        raise RuntimeError("SESSION_SECRET is empty; set a random value in .env")
     if settings.environment != "development" and settings.session_secret == "dev-only-change-me":
         raise RuntimeError("SESSION_SECRET must be set outside development")
+    if not settings.llm_configured:
+        logging.getLogger("hotel_agent").warning(
+            "No text model configured (LLM_BASE_URL/LLM_API_KEY/LLM_MODEL): replies will use approved-fact "
+            "fallbacks only. For the local model set LLM_BASE_URL=http://localhost:8003/v1, LLM_API_KEY=local, "
+            "LLM_MODEL=qwen3.5-2b.")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

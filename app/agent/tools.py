@@ -70,9 +70,9 @@ SCHEMAS = {
 
 
 BOOKING_INTENT = re.compile(
-    r"\b(rooms?|book(ing|ed)?|reserv\w*|availab\w*|vacan\w*|price|rates?|cost|nights?|stay|tonight|"
-    r"tomorrow|weekend|check.?in date|chambres?|réserv\w*|disponib\w*|prix|tarifs?|nuits?|séjour|ce soir|demain)\b"
-    r"|غرف|حجز|احجز|متاح|متوفر|سعر|أسعار|ليلة|ليال|الليلة|غدا"
+    r"\b(rooms?|book(ing|ed)?|reserv\w*|availability|vacanc\w*|price|rates?|cost|nights?|tonight|"
+    r"tomorrow|weekend|check.?in date|chambres?|réserv\w*|disponibilités?|prix|tarifs?|nuits?|séjour|ce soir|demain)\b"
+    r"|غرف|حجز|احجز|سعر|أسعار|ليلة|ليال|الليلة|غدا"
     r"|\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}",
     re.IGNORECASE,
 )
@@ -80,6 +80,14 @@ HUMAN_INTENT = re.compile(
     r"\b(human|person|someone|staff|manager|agent|reception(ist)?|complain\w*|speak to|talk to|refund|cancel\w*|"
     r"change my|modify|personne|humain|responsable|plainte|annul\w*|modifier|conseiller)\b"
     r"|موظف|شخص|مدير|إنسان|شكوى|أشتكي|إلغاء|الغاء|تعديل|استرداد",
+    re.IGNORECASE,
+)
+# An explicit request for a person: handed off at once, without asking the model.
+EXPLICIT_HUMAN = re.compile(
+    r"\b(talk|speak|chat) (to|with) (a |an |the )?(human|person|someone|staff|member of staff|manager|agent|"
+    r"reception(ist)?|real person)|\b(member of staff|staff member|real person|human agent)\b"
+    r"|\b(parler (à|a) (un|une|le|la) (personne|humain|conseiller|responsable|réception))"
+    r"|(أكلم|اكلم|أتحدث مع|اتحدث مع|التحدث مع|أريد|اريد|عاوز|بدي|نحب)\s*(أحد\s*)?(موظف|الموظفين|شخص|مدير|الاستقبال)",
     re.IGNORECASE,
 )
 RESERVATION_INTENT = re.compile(r"\b(reference|confirmation|my booking|ma réservation|FK-)|رقم الحجز|حجزي", re.IGNORECASE)

@@ -1,6 +1,6 @@
 """Voice channel over WebSocket: ASR -> streamed agent turn -> sequenced TTS.
 
-Client -> server: binary audio frames for one utterance, then {"type": "utterance_end", "mime": ...};
+Client -> server: binary audio frames for one utterance, then {"type": "utterance_end", "mime": ..., "language": "ar"};
 {"type": "text", "text": ...} for typed input; {"type": "interrupt"} to barge in.
 Server -> client: transcript, agent events (status/delta/sentence/offers/quote/...), audio, audio_end, turn_end.
 """
@@ -103,18 +103,23 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
                 if not payload or mime not in AUDIO_TYPES:
                     await send({"type": "error", "detail": "No usable audio received"})
                     continue
-                await cancel_turn()  # a new utterance always replaces the current answer
+                # The guest's chosen language guides recognition; dialects are guessed badly without it.
+                hint = data.get("language") if data.get("language") in languages else None
                 try:
-                    text = await providers.transcribe(payload, "utterance." + mime.split("/")[1], mime)
+                    text = await providers.transcribe(payload, "utterance." + mime.split("/")[1], mime, hint)
                 except Unavailable:
                     await send({"type": "error", "detail": "Speech recognition is unavailable"})
                     continue
+                answering = turn is not None and not turn.done()
                 if not lang.plausible_transcript(text, languages):
-                    # Likely noise or echo: do not bother the model, ask the guest to repeat.
+                    # Noise or echo. It must not cancel an answer in progress, and while the agent is
+                    # answering it is ignored silently; otherwise ask the guest to repeat.
                     await send({"type": "transcript", "text": text, "rejected": True})
-                    await send({"type": "error", "detail": lang.localized(lang.NOT_UNDERSTOOD, conv_language)})
-                    await send({"type": "turn_end"})
+                    if not answering:
+                        await send({"type": "error", "detail": lang.localized(lang.NOT_UNDERSTOOD, hint or conv_language)})
+                        await send({"type": "turn_end"})
                     continue
+                await cancel_turn()  # real speech replaces the current answer (barge-in)
                 await send({"type": "transcript", "text": text})
                 turn = asyncio.create_task(run_turn(text))
             elif kind == "text" and str(data.get("text", "")).strip():

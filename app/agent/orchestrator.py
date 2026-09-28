@@ -18,12 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import language as lang
 from app.agent.sentences import CitationFilter, MarkdownFilter, SentenceChunker, citations
-from app.agent.tools import BOOKING_INTENT, ToolExecutor, tool_definitions
+from app.agent.tools import BOOKING_INTENT, EXPLICIT_HUMAN, HUMAN_INTENT, ToolExecutor, tool_definitions
 from app.booking.registry import connector_for
 from app.booking.service import BookingService
 from app.config import Settings
 from app.errors import Unavailable
-from app.knowledge.fallback import match_facts
+from app.knowledge.fallback import match_facts, small_talk
 from app.knowledge.service import KnowledgeService
 from app.models import Conversation, Message, Property, Turn
 from app.providers import Providers
@@ -106,6 +106,25 @@ class TurnRunner:
             yield {"type": "sentence", "text": s}
         yield {"type": "done", "message_id": turn.message_id, "replayed": True}
 
+    async def _handoff_now(self, text: str, request_id: str, digest: str, guest_lang: str) -> AsyncIterator[dict]:
+        executor = ToolExecutor(BookingService(self.session, self.prop, connector_for(self.prop)), self.conv)
+        outcome = await executor.run("handoff_to_staff", json.dumps({"reason": f"Guest asked for staff: {text[:200]}"}))
+        for event in outcome.events:
+            yield event
+        answer = lang.localized(lang.HANDED_OFF, guest_lang)
+        yield {"type": "delta", "text": answer}
+        for sentence in SentenceChunker().feed(answer + " "):
+            yield {"type": "sentence", "text": sentence}
+        reply = Message(conversation_id=self.conv.id, property_id=self.prop.id, sender="ai", content=answer,
+                        meta={"handoff": "direct_request"})
+        self.session.add(reply)
+        await self.session.flush()
+        self.session.add(Turn(conversation_id=self.conv.id, property_id=self.prop.id, request_id=request_id,
+                              input_hash=digest, message_id=reply.id, model="", sources=[],
+                              tools=[{"name": "handoff_to_staff", "ok": True, "ms": 0}], timings={}))
+        await self.session.commit()
+        yield {"type": "done", "message_id": reply.id, "language": guest_lang}
+
     async def run(self, text: str, request_id: str, language: str | None = None) -> AsyncIterator[dict]:
         t0 = time.perf_counter()
         timings: dict[str, int] = {}
@@ -135,6 +154,12 @@ class TurnRunner:
         if self.conv.ai_paused or not self.prop.ai_enabled:
             yield {"type": "paused", "text": lang.localized(lang.PAUSED, guest_lang)}
             yield {"type": "done", "message_id": None}
+            return
+
+        if EXPLICIT_HUMAN.search(text):
+            # "I want to talk to a member of staff": hand off immediately; no model round-trip.
+            async for event in self._handoff_now(text, request_id, digest, guest_lang):
+                yield event
             return
 
         knowledge = KnowledgeService(self.session, self.providers, self.prop.id)
@@ -263,7 +288,18 @@ class TurnRunner:
         except Unavailable as exc:
             meta["error"] = "provider_unavailable" + (f" (HTTP {exc.upstream_status})" if exc.upstream_status else "")
             matched = match_facts(text, facts) if not answer.strip() else []
-            if matched:
+            chat = small_talk(text) if not answer.strip() else None
+            if not answer.strip() and HUMAN_INTENT.search(text):
+                # Asking for a person must work even with the model down.
+                outcome = await executor.run("handoff_to_staff", json.dumps({"reason": f"Guest asked for staff: {text[:200]}"}))
+                answer = lang.localized(lang.HANDED_OFF, guest_lang)
+                for event in outcome.events:
+                    yield event
+                yield {"type": "delta", "text": answer}
+                for sentence in SentenceChunker().feed(answer + " "):
+                    yield {"type": "sentence", "text": sentence}
+                meta["fallback"] = "handoff"
+            elif matched:
                 # Model down: answer common questions verbatim from approved facts, with their ids
                 # so the audit shows where the answer came from.
                 answer = " ".join(f"{f['content']} [{f['id']}]" for f in matched)
@@ -272,6 +308,12 @@ class TurnRunner:
                 for sentence in SentenceChunker().feed(shown + " ") + chunker.flush():
                     yield {"type": "sentence", "text": sentence}
                 meta["fallback"] = "approved_facts"
+            elif chat:
+                answer = lang.localized(chat, guest_lang)
+                yield {"type": "delta", "text": answer}
+                for sentence in SentenceChunker().feed(answer + " "):
+                    yield {"type": "sentence", "text": sentence}
+                meta["fallback"] = "small_talk"
             else:
                 fallback = lang.localized(lang.UNAVAILABLE, guest_lang)
                 yield {"type": "error", "detail": fallback}

@@ -192,7 +192,7 @@ def test_provider_failure_gives_localized_fallback(client):
 
     client.app.state.providers.stream_chat = broken
     conv, h = start(client, language="ar")
-    events = send(client, conv, h, "مرحبا")
+    events = send(client, conv, h, "هل تقبلون العملات الرقمية؟")
     assert events[0]["type"] == "error" and "عذراً" in events[0]["detail"]
 
 
@@ -238,7 +238,7 @@ def test_prompt_injection_cannot_expose_confirm_tool(client):
 def test_voice_transcribes_and_streams_audio_in_sentence_order(client):
     providers = client.app.state.providers
 
-    async def transcribe(audio, filename, content_type):
+    async def transcribe(audio, filename, content_type, language=None):
         assert audio == b"fake-webm-bytes"
         return "When is breakfast?"
 
@@ -301,7 +301,7 @@ def test_voice_skips_audio_for_unsupported_tts_language(client):
 def test_voice_noise_transcript_does_not_reach_model(client):
     providers = client.app.state.providers
 
-    async def transcribe(audio, filename, content_type):
+    async def transcribe(audio, filename, content_type, language=None):
         return "好，Q。"
 
     providers.transcribe = transcribe
@@ -477,3 +477,90 @@ def test_model_down_answers_common_questions_from_approved_facts(client):
     # Unknown question still gets the honest "team can help" message.
     events = send(client, conv, h, "Can you recommend a nightclub?")
     assert events[0]["type"] == "error"
+
+
+def test_voice_noise_does_not_cancel_an_answer_in_progress(client):
+    providers = client.app.state.providers
+    heard = iter(["What time is check-out?", "ห"])  # real question, then noise while answering
+
+    async def transcribe(audio, filename, content_type, language=None):
+        assert language == "ar"  # the guest's chosen language reaches the recognizer
+        return next(heard)
+
+    async def slow_speak(text):
+        await asyncio.sleep(0.3)
+        return b"mp3"
+
+    providers.transcribe, providers.speak = transcribe, slow_speak
+    script(client, [[("text", "Check-out is by 12:00. Enjoy your stay.")]])
+    conv, h = start(client)
+    token = h["Authorization"].split()[1]
+    with client.websocket_connect(f"/v1/conversations/{conv}/voice?token={token}") as ws:
+        ws.send_bytes(b"speech")
+        ws.send_json({"type": "utterance_end", "mime": "audio/wav", "language": "ar"})
+        assert ws.receive_json()["type"] == "transcript"
+        ws.send_bytes(b"noise")
+        ws.send_json({"type": "utterance_end", "mime": "audio/wav", "language": "ar"})
+        msgs = []
+        while (m := ws.receive_json())["type"] != "turn_end":
+            msgs.append(m)
+    kinds = [m["type"] for m in msgs]
+    assert "interrupted" not in kinds and "audio_end" in kinds
+    assert not any(m["type"] == "error" for m in msgs)  # noise during an answer is ignored silently
+
+
+def test_model_down_handoff_and_small_talk_still_work(client):
+    from app.errors import Unavailable
+
+    async def down(messages, tools=None):
+        raise Unavailable("down")
+        yield  # pragma: no cover
+
+    client.app.state.providers.stream_chat = down
+    conv, h = start(client)
+    events = send(client, conv, h, "I would like to talk to a member of staff.")
+    assert any(e["type"] == "handoff" for e in events)
+    assert "passed this to our team" in "".join(e["text"] for e in events if e["type"] == "delta")
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+    assert client.get(f"/v1/staff/conversations/{conv}", headers=staff).json()["ai_paused"] is True
+    client.post(f"/v1/staff/conversations/{conv}/takeover", json={"paused": False}, headers=staff)
+    assert "welcome" in "".join(e["text"] for e in send(client, conv, h, "Okay, thanks.") if e["type"] == "delta")
+    events = send(client, conv, h, "أو زارف موقع ال أوتيلفين")  # dialect ASR output asking for the location
+    assert any(e["type"] == "delta" for e in events) and events[0]["type"] != "error"
+
+
+def test_breakfast_question_is_not_a_booking_and_arabic_article_matches(client):
+    from app.errors import Unavailable
+
+    async def down(messages, tools=None):
+        raise Unavailable("down")
+        yield  # pragma: no cover
+
+    client.app.state.providers.stream_chat = down
+    conv, h = start(client, language="ar")
+    events = send(client, conv, h, "هل الإفطار متوفر؟")
+    assert not any(e["type"] == "booking_form" for e in events)
+    assert "06:30" in "".join(e["text"] for e in events if e["type"] == "delta")
+    assert not any(e["type"] == "booking_form" for e in send(client, conv, h, "Is breakfast available?"))
+    assert any(e["type"] == "booking_form" for e in send(client, conv, h, "Do you have availability next week?"))
+
+
+def test_empty_session_secret_is_refused(tmp_path):
+    with pytest.raises(RuntimeError):
+        create_app(Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/x.db", session_secret=""))
+
+
+@pytest.mark.parametrize("text", ["I would like to talk to a member of staff.", "Can I speak to a manager?",
+                                  "عاوز اكلم موظف", "أريد التحدث مع موظف"])
+def test_explicit_request_for_a_person_hands_off_without_the_model(client, text):
+    llm = script(client, [])
+    conv, h = start(client)
+    events = send(client, conv, h, text)
+    assert llm.requests == [] and any(e["type"] == "handoff" for e in events)
+    assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["ai_paused"] is True
+
+
+def test_children_question_does_not_open_booking_form(client):
+    script(client, [[("text", "Children under 6 stay free.")]])
+    conv, h = start(client)
+    assert not any(e["type"] == "booking_form" for e in send(client, conv, h, "Can children stay for free?"))

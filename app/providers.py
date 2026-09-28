@@ -127,11 +127,14 @@ class Providers:
         except (ValueError, KeyError, TypeError) as exc:
             raise Unavailable("Embedding provider returned invalid vectors") from exc
 
-    async def transcribe(self, audio: bytes, filename: str, content_type: str) -> str:
+    async def transcribe(self, audio: bytes, filename: str, content_type: str, language: str | None = None) -> str:
+        data = {"model": self.s.asr_model}
+        if language:
+            data["language"] = language  # ISO 639-1, e.g. "ar"
         response = await self._post(
             self.s.asr_base_url.rstrip("/") + "/audio/transcriptions",
             self.s.asr_api_key,
-            data={"model": self.s.asr_model},
+            data=data,
             files={"file": (filename, audio, content_type)},
             timeout=30,
         )

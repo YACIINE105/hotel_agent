@@ -20,7 +20,9 @@ KEYWORDS: dict[str, list[str]] = {
     "golf": ["golf", "جولف", "غولف"],
     "water_sports": ["diving", "dive", "snorkel", "water sport", "غوص", "رياضات مائية", "plongée"],
     "children": ["child", "children", "kid", "kids", "baby", "طفل", "أطفال", "الأطفال", "enfant", "enfants"],
-    "address": ["address", "where", "location", "phone", "email", "contact", "عنوان", "العنوان", "أين", "هاتف", "adresse"],
+    "address": ["address", "where", "location", "located", "map", "directions", "phone", "email", "contact",
+                "عنوان", "العنوان", "أين", "وين", "فين", "موقع", "الموقع", "مكان", "لوكيشن", "خريطة", "هاتف", "رقم",
+                "adresse", "où", "situé"],
     "airport_transfer": ["airport", "transfer", "shuttle", "taxi", "مطار", "المطار", "نقل", "aéroport", "navette"],
     "accessibility": ["wheelchair", "disabled", "accessible", "accessibility", "كرسي متحرك", "احتياجات خاصة", "handicap"],
     "rooms": ["suite", "suites", "room types", "rooms", "أجنحة", "جناح", "غرف", "chambres"],
@@ -34,9 +36,9 @@ def match_facts(question: str, facts: list[dict], limit: int = 2) -> list[dict]:
     scored = []
     for fact in facts:
         key = fact["id"].split(":", 1)[1]
-        # Arabic attaches prefixes (و and, ب with, ل for, ف so, ك like) directly to words: "والمغادرة".
+        # Arabic attaches prefixes (و and, ب with, ل for, ف so, ك like, ال the) to words: "والمغادرة", "الإفطار".
         hits = sum(1 for kw in KEYWORDS.get(key, [])
-                   if re.search(rf"(?<!\w)(?:[وبلفك])?{re.escape(kw.casefold())}(?!\w)", text))
+                   if re.search(rf"(?<!\w)(?:[وبلفك]?ال|[وبلفك])?{re.escape(kw.casefold())}(?!\w)", text))
         if hits:
             scored.append((hits, fact))
     scored.sort(key=lambda x: -x[0])
@@ -45,3 +47,31 @@ def match_facts(question: str, facts: list[dict], limit: int = 2) -> list[dict]:
 # Other common fact-key spellings used by hotels.
 KEYWORDS["pool"] = KEYWORDS["pools"]
 KEYWORDS["breakfast"] = KEYWORDS["dining"]
+
+
+SMALL_TALK = [
+    (re.compile(r"\b(thanks?|thank you|thx|merci)\b|شكرا|شكراً|مشكور|يعطيك العافية", re.I), {
+        "en": "You're welcome! Anything else I can help with?",
+        "ar": "العفو! هل يمكنني مساعدتك في شيء آخر؟",
+        "fr": "Avec plaisir ! Puis-je vous aider pour autre chose ?"}),
+    (re.compile(r"^\W*(ok(ay)?|alright|good|great|perfect|d'accord)\W*$|^\W*(تمام|حسنا|حسناً|طيب|ممتاز|اوكي)\W*$", re.I), {
+        "en": "Great. Let me know if you need anything else.",
+        "ar": "تمام. أخبرني إذا احتجت أي شيء آخر.",
+        "fr": "Parfait. Dites-moi si vous avez besoin d'autre chose."}),
+    (re.compile(r"^\W*(hi|hello|hey|good (morning|evening|afternoon)|bonjour|bonsoir|salut)\b|مرحبا|أهلا|اهلا|السلام عليكم|صباح الخير|مساء الخير", re.I), {
+        "en": "Hello! How can I help you with your stay?",
+        "ar": "أهلاً بك! كيف يمكنني مساعدتك في إقامتك؟",
+        "fr": "Bonjour ! Comment puis-je vous aider pour votre séjour ?"}),
+    (re.compile(r"\b(bye|goodbye|see you|au revoir)\b|مع السلامة|وداعا|إلى اللقاء", re.I), {
+        "en": "Goodbye, and enjoy your stay!",
+        "ar": "مع السلامة، ونتمنى لك إقامة ممتعة!",
+        "fr": "Au revoir et bon séjour !"}),
+]
+
+
+def small_talk(question: str) -> dict | None:
+    """Localized reply table for greetings/thanks/ok/bye, or None."""
+    for pattern, replies in SMALL_TALK:
+        if pattern.search(question.strip()):
+            return replies
+    return None
