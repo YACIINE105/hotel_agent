@@ -22,6 +22,7 @@ from app.realtime import make_broker
 from app.seed import seed
 
 WEB = Path(__file__).parent / "web"
+NO_CACHE = {"Cache-Control": "no-cache"}  # browsers revalidate, so page updates show up immediately
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
@@ -89,15 +90,22 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
 
     @app.get("/", include_in_schema=False)
     async def demo():
-        return FileResponse(WEB / "demo.html")
+        return FileResponse(WEB / "demo.html", headers=NO_CACHE)
 
     @app.get("/shop", include_in_schema=False)
     async def shop_page():
-        return FileResponse(WEB / "shop.html")
+        return FileResponse(WEB / "shop.html", headers=NO_CACHE)
 
     @app.get("/inbox", include_in_schema=False)
     async def inbox():
-        return FileResponse(WEB / "inbox.html")
+        return FileResponse(WEB / "inbox.html", headers=NO_CACHE)
+
+    @app.middleware("http")
+    async def static_no_cache(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     app.mount("/static", StaticFiles(directory=WEB), name="static")
     return app

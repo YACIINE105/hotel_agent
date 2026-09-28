@@ -8,6 +8,7 @@ Safety rules shared with the hotel agent:
 """
 
 import asyncio
+import math
 import re
 import secrets
 import time
@@ -30,6 +31,30 @@ GENERIC = re.compile(r"\b(the|hotel|hotels|resort|resorts|and|spa|suites?|inn|by
 def merge_key(name: str) -> str:
     """Same hotel from different sites: compare names without filler words and punctuation."""
     return re.sub(r"[\W_]+", "", GENERIC.sub(" ", name.casefold()))
+
+
+def _distance_km(a: dict, b: dict) -> float | None:
+    if None in (a.get("latitude"), a.get("longitude"), b.get("latitude"), b.get("longitude")):
+        return None
+    lat1, lon1, lat2, lon2 = map(math.radians, (a["latitude"], a["longitude"], b["latitude"], b["longitude"]))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
+def same_hotel(a: dict, b: dict, city: str) -> bool:
+    """trivago says "Sea Hotel Hurghada", Google says "Sea Hotel": same place, different names."""
+    city_key = merge_key(city)
+    ka, kb = merge_key(a["name"]).replace(city_key, ""), merge_key(b["name"]).replace(city_key, "")
+    if ka and ka == kb:
+        return True
+    if min(len(ka), len(kb)) >= 6 and (ka in kb or kb in ka):
+        return True
+    d = _distance_km(a, b)
+    if d is not None and d < 0.25:
+        wa = set(GENERIC.sub(" ", a["name"].casefold()).split()) - {city.casefold()}
+        wb = set(GENERIC.sub(" ", b["name"].casefold()).split()) - {city.casefold()}
+        return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.5
+    return False
 
 
 def _aware(dt: datetime) -> datetime:
@@ -61,11 +86,14 @@ class ShopService:
         if not self.suppliers:
             raise AppError("No hotel suppliers are configured", status_code=503)
         outcomes = await asyncio.gather(*(self._one(s, query) for s in self.suppliers.values()))
-        merged: dict[str, dict] = {}
+        merged: list[dict] = []
         for results, _ in outcomes:
             for hotel in results:
-                key = merge_key(hotel.name)
-                entry = merged.setdefault(key, {**hotel.model_dump(mode="json", exclude={"offers"}), "offers": []})
+                data = hotel.model_dump(mode="json", exclude={"offers"})
+                entry = next((m for m in merged if same_hotel(m, data, query.city)), None)
+                if entry is None:
+                    entry = {**data, "offers": []}
+                    merged.append(entry)
                 for field in ("stars", "rating", "reviews", "image", "address", "latitude", "longitude", "provider"):
                     if entry.get(field) in (None, "") and getattr(hotel, field) not in (None, ""):
                         entry[field] = getattr(hotel, field)
@@ -78,14 +106,20 @@ class ShopService:
         await self.session.flush()
 
         hotels, n = [], 0
-        for entry in merged.values():
+        for entry in merged:
             offers = [o for o in entry["offers"]
                       if not query.max_price_per_night or Decimal(o["total"]) / query.nights <= query.max_price_per_night]
             if query.min_stars and (entry.get("stars") or 0) < query.min_stars:
                 continue
             if not offers:
                 continue
-            offers.sort(key=lambda o: Decimal(o["total"]))
+            # One offer per site: when trivago and Google Hotels both report a site, keep the cheaper.
+            per_site: dict[str, dict] = {}
+            for o in offers:
+                key = (o["source"].casefold(), o["kind"], o["room_name"] if o["kind"] == "bookable" else "")
+                if key not in per_site or Decimal(o["total"]) < Decimal(per_site[key]["total"]):
+                    per_site[key] = o
+            offers = sorted(per_site.values(), key=lambda o: Decimal(o["total"]))
             for o in offers:
                 n += 1
                 o["offer_id"] = f"{search.id[:6]}-{n}"

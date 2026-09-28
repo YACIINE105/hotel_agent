@@ -66,6 +66,7 @@ class SupplierOffer(Strict):
     free_cancellation_until: str | None = None
     total: Decimal
     currency: str
+    per_night: Decimal | None = None
     link: str | None = None          # redirect offers: continue on the provider's site
     via: str | None = None           # metasearch that found the deal, e.g. "trivago"
     simulated: bool = False

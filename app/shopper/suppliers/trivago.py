@@ -105,6 +105,7 @@ class TrivagoSupplier:
                 supplier=self.name, source=source, via="trivago", kind="redirect",
                 supplier_offer_id=str(h.get("accommodation_id", "")), room_name="Best current deal",
                 refundable=True if query.refundable_only else None, total=total,
+                per_night=parse_price(h.get("price_per_night")) or (total / query.nights).quantize(Decimal("0.01")),
                 currency=h.get("currency") or query.currency, link=h.get("accommodation_url"))
             results.append(HotelResult(
                 hotel_key=f"trivago:{h.get('accommodation_id')}", name=h.get("accommodation_name", "Hotel"),

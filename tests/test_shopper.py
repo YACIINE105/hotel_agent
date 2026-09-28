@@ -203,29 +203,70 @@ async def test_liteapi_timeout_on_book_is_unknown_not_failed():
         assert out.status == "UNKNOWN"  # never report failure when the supplier may have booked
 
 
-async def test_google_hotels_lists_each_booking_site_price_with_link():
+GOOGLE_LIST = {"properties": [{
+    "name": "Sea Hotel", "property_token": "TOK", "extracted_hotel_class": 4, "overall_rating": 4.3, "reviews": 900,
+    "link": "https://sea-hotel.example", "gps_coordinates": {"latitude": 27.2, "longitude": 33.8},
+    "prices": [
+        {"source": "Booking.com", "rate_per_night": {"lowest": "$100", "extracted_lowest": 100}, "free_cancellation": True},
+        {"source": "Expedia", "rate_per_night": {"lowest": "$95", "extracted_lowest": 95}},
+        {"source": "Sea Hotel", "rate_per_night": {"lowest": "$98", "extracted_lowest": 98}}]}]}
+
+
+async def test_google_hotels_one_call_gives_each_site_price():
+    calls = []
+
     def handler(request: httpx.Request):
-        params = dict(request.url.params)
-        if "property_token" in params:
-            return httpx.Response(200, json={"featured_prices": [
-                {"source": "Booking.com", "link": "https://booking.example/1", "total_rate": {"extracted_lowest": 300},
-                 "rooms": [{"name": "Double Room"}]}],
-                "prices": [
-                {"source": "Expedia", "link": "https://expedia.example/1", "total_rate": {"extracted_lowest": 285},
-                 "free_cancellation": True},
-                {"source": "Booking.com", "link": "https://booking.example/2", "total_rate": {"extracted_lowest": 310}}]})
-        assert params["engine"] == "google_hotels" and params["sort_by"] == "3"
-        return httpx.Response(200, json={"properties": [
-            {"name": "Sea Hotel", "property_token": "TOK", "extracted_hotel_class": 4, "overall_rating": 4.3,
-             "reviews": 900, "gps_coordinates": {"latitude": 27.2, "longitude": 33.8}}]})
+        calls.append(dict(request.url.params))
+        assert request.url.params["engine"] == "google_hotels" and request.url.params["sort_by"] == "3"
+        return httpx.Response(200, json=GOOGLE_LIST)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         hotels = await GoogleHotelsSupplier("serp", client).search(query())
+    assert len(calls) == 1  # 1 SerpApi credit per search
     offers = {o.source: o for o in hotels[0].offers}
-    assert offers["Booking.com"].total == Decimal("300.00")  # cheapest per site kept
-    assert offers["Expedia"].total == Decimal("285.00") and offers["Expedia"].refundable is True
-    assert all(o.kind == "redirect" and o.link for o in offers.values())
-    assert hotels[0].rating == 8.6  # 4.3/5 -> out of 10
+    assert offers["Expedia"].per_night == Decimal("95") and offers["Expedia"].total == Decimal("285.00")
+    assert offers["Booking.com"].refundable is True
+    assert "booking.com/searchresults.html" in offers["Booking.com"].link  # the site's own search for the stay
+    assert "expedia.com/Hotel-Search" in offers["Expedia"].link
+    assert offers["Sea Hotel"].link == "https://sea-hotel.example"
+    assert hotels[0].rating == 8.6
+
+
+async def test_google_hotels_optional_details_call():
+    def handler(request: httpx.Request):
+        if "property_token" in request.url.params:
+            return httpx.Response(200, json={"prices": [
+                {"source": "Expedia", "link": "https://expedia.example/1", "total_rate": {"extracted_lowest": 280},
+                 "free_cancellation": True}]})
+        return httpx.Response(200, json=GOOGLE_LIST)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        hotels = await GoogleHotelsSupplier("serp", client, details_for_top=1).search(query())
+    assert hotels[0].offers[0].link == "https://expedia.example/1" and hotels[0].offers[0].total == Decimal("280.00")
+
+
+async def test_trivago_and_google_merge_into_one_card_with_one_price_per_site(shop):
+    svc, conv = shop
+
+    class FakeTrivago:
+        name, label, bookable, simulated, configured = "trivago", "trivago", False, False, True
+
+        async def search(self, q):
+            offer = SupplierOffer(supplier="trivago", source="Expedia", via="trivago", kind="redirect",
+                                  supplier_offer_id="t1", room_name="Best current deal", total=Decimal("270"),
+                                  currency="USD", per_night=Decimal("90"), link="https://trivago.example/x")
+            return [HotelResult(hotel_key="trivago:1", name="Sea Hotel Hurghada", provider="trivago", offers=[offer])]
+
+    def handler(request):
+        return httpx.Response(200, json=GOOGLE_LIST)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        svc = ShopService(svc.session, svc.prop, [FakeTrivago(), GoogleHotelsSupplier("serp", client)])
+        s = await svc.search(conv, query())
+    hotel = s.results[0]
+    sources = [o["source"] for o in hotel["offers"]]
+    assert sorted(sources) == ["Booking.com", "Expedia", "Sea Hotel"]  # Expedia once: the cheaper (trivago) kept
+    assert hotel["offers"][0]["via"] == "trivago" and hotel["best_total"] == "270"
 
 
 async def test_saving_compares_the_same_room_type(shop):
@@ -317,3 +358,16 @@ async def test_trivago_offers_cannot_be_booked_in_app(session, shop):
     with pytest.raises(Exception) as exc:
         await svc.quote_best_of(conv, [s.results[0]["offers"][0]["offer_id"]], GUEST)
     assert "compare_only" in str(exc.value)
+
+
+def test_same_hotel_matching_across_sources():
+    from app.shopper.service import same_hotel
+
+    a = {"name": "Sea Hotel Hurghada", "latitude": 27.2, "longitude": 33.8}
+    assert same_hotel(a, {"name": "Sea Hotel"}, "Hurghada")
+    assert same_hotel({"name": "Hilton Hurghada Plaza"}, {"name": "Hilton Hurghada Plaza Hotel"}, "Hurghada")
+    assert same_hotel({"name": "Albatros White Beach", "latitude": 27.1, "longitude": 33.83},
+                      {"name": "Pickalbatros White Beach Resort", "latitude": 27.1005, "longitude": 33.8302}, "Hurghada")
+    assert not same_hotel({"name": "Palm Marina Hotel"}, {"name": "Marina Lights Hotel"}, "Hurghada")
+    assert not same_hotel({"name": "Sea Hotel", "latitude": 27.2, "longitude": 33.8},
+                          {"name": "Desert Rose", "latitude": 27.2001, "longitude": 33.8001}, "Hurghada")

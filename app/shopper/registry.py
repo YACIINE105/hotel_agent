@@ -18,7 +18,7 @@ def build_suppliers(settings: Settings, client: httpx.AsyncClient) -> list:
         suppliers.append(LiteApiSupplier(settings.liteapi_key, client, settings.liteapi_nationality,
                                          sandbox=settings.liteapi_sandbox))
     if settings.serpapi_key:
-        suppliers.append(GoogleHotelsSupplier(settings.serpapi_key, client))
+        suppliers.append(GoogleHotelsSupplier(settings.serpapi_key, client, settings.serpapi_details_for_top))
     if settings.shop_simulated_suppliers:
         suppliers += simulated_suppliers()
     return suppliers

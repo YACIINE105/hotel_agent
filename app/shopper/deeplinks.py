@@ -25,3 +25,14 @@ def check_links(hotel_name: str, q: StaySearch) -> list[dict]:
         {"label": "Expedia", "url": "https://www.expedia.com/Hotel-Search?" + urlencode(expedia)},
         {"label": "Google Hotels", "url": "https://www.google.com/travel/search?" + urlencode(google)},
     ]
+
+
+def site_search_link(source: str, hotel_name: str, q: StaySearch) -> str | None:
+    """The site's own search page for this hotel and dates, for sources we know how to link."""
+    links = {link["label"].casefold(): link["url"] for link in check_links(hotel_name, q)}
+    key = source.casefold()
+    if "booking.com" in key:
+        return links["booking.com"]
+    if "expedia" in key:
+        return links["expedia"]
+    return None
