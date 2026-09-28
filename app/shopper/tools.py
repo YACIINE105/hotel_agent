@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from pydantic import ValidationError
 
-from app.agent.tools import HUMAN_INTENT, ToolOutcome
+from app.agent.tools import HUMAN_INTENT, ToolOutcome, check_guest_details_given
 from app.errors import AppError
 from app.models import Conversation, Handoff
 from app.shopper.contracts import Guest, StaySearch
@@ -24,12 +24,12 @@ SHOP_INTENT = re.compile(
 )
 
 SHOPPER_RULES = """You are {brand}, a travel shopping assistant. You search many booking sites at once for the lowest hotel prices and can book offers marked bookable.
-Today is {weekday} {today}. Resolve relative dates such as "next Friday" from this and state the exact dates you used.
+Today is {weekday} {today}. {date_help} State the exact dates you used.
 Reply in {language} unless the guest writes in another language; then use theirs.
 Style: warm and brief, 1-3 short sentences, plain text only (no markdown or lists).
 Rules:
 - Prices come only from search_stays and compare_prices. Never invent, estimate, or convert prices.
-- To search you need the city with its country, check-in and check-out dates, number of adults, and each child's age. Ask for anything missing in one short question. Use the ISO country code (Egypt = EG, United Arab Emirates = AE, Turkey = TR, Algeria = DZ, France = FR).
+- To search you need the city with its country, check-in and check-out dates, number of adults, and each child's age. Ask for anything missing in one short question. Use the English city name (الغردقة = Hurghada) and the ISO country code (Egypt = EG, United Arab Emirates = AE, Turkey = TR, Algeria = DZ, France = FR).
 - After a search, the guest sees hotel cards. Mention the best one or two options: hotel, total price, which site, and how much cheaper it is than the most expensive site.
 - Compare-only offers (from price comparison sites) cannot be booked here; tell the guest to continue on that site with the link on the card.
 - When the guest picks one offer, or asks to "book the cheapest of these", collect first name, last name and email, then call prepare_booking with the offer_ids. The system re-checks every chosen offer and keeps the cheapest one still available.
@@ -104,6 +104,7 @@ class ShopToolExecutor:
     def __init__(self, shop: ShopService, conversation: Conversation):
         self.shop, self.conversation = shop, conversation
         self.offers: set[str] = set()  # interface parity with the hotel executor
+        self.guest_text = ""  # everything the guest typed in this conversation (set by the orchestrator)
 
     async def run(self, name: str, raw_args: str) -> ToolOutcome:
         if name not in SCHEMAS:
@@ -152,6 +153,9 @@ class ShopToolExecutor:
         if isinstance(ids, str):
             ids = [ids]
         guest = Guest.model_validate({k: args[k] for k in ("first_name", "last_name", "email", "phone") if args.get(k)})
+        problem = check_guest_details_given(guest.email, self.guest_text)
+        if problem:
+            return ToolOutcome({"error": problem})
         quote = await self.shop.quote_best_of(self.conversation.id, [str(i) for i in ids][:10], guest)
         view = quote_view(quote)
         return ToolOutcome({"quote": {k: view[k] for k in ("hotel_name", "source", "room_name", "total", "currency")},

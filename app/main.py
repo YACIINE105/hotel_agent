@@ -91,6 +91,10 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
     async def demo():
         return FileResponse(WEB / "demo.html")
 
+    @app.get("/shop", include_in_schema=False)
+    async def shop_page():
+        return FileResponse(WEB / "shop.html")
+
     @app.get("/inbox", include_in_schema=False)
     async def inbox():
         return FileResponse(WEB / "inbox.html")

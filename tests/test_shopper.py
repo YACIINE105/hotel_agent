@@ -224,3 +224,14 @@ async def test_google_hotels_lists_each_booking_site_price_with_link():
     assert offers["Expedia"].total == Decimal("285.00") and offers["Expedia"].refundable is True
     assert all(o.kind == "redirect" and o.link for o in offers.values())
     assert hotels[0].rating == 8.6  # 4.3/5 -> out of 10
+
+
+async def test_saving_compares_the_same_room_type(shop):
+    svc, conv = shop
+    s = await svc.search(conv, query())
+    for h in s.results:
+        best = h["offers"][0]
+        same = [Decimal(o["total"]) for o in h["offers"] if o["room_name"] == best["room_name"]]
+        assert Decimal(h["saving"]) == max(same) - Decimal(best["total"])
+        if h["bookable"]:
+            assert h["best_bookable"]["total"] == next(o["total"] for o in h["offers"] if o["kind"] == "bookable")

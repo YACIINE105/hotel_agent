@@ -93,6 +93,15 @@ EXPLICIT_HUMAN = re.compile(
 RESERVATION_INTENT = re.compile(r"\b(reference|confirmation|my booking|ma réservation|FK-)|رقم الحجز|حجزي", re.IGNORECASE)
 
 
+def check_guest_details_given(email: str, guest_text: str) -> str | None:
+    """Small models invent names and emails to complete a tool call. The email must appear in what
+    the guest actually typed (or submitted in a form) in this conversation."""
+    if email.casefold() not in guest_text.casefold():
+        return ("The guest has not given these details. Ask the guest for their first name, last name "
+                "and email, and use exactly what they write.")
+    return None
+
+
 def tool_definitions(capabilities: frozenset[Capability], text: str = "", booking_context: bool = True) -> list[dict]:
     """Offer only the tools this turn could need.
 
@@ -127,6 +136,7 @@ class ToolExecutor:
     def __init__(self, booking: BookingService, conversation: Conversation):
         self.booking, self.conversation = booking, conversation
         self.offers: set[str] = set()  # only offers found in this conversation may be quoted
+        self.guest_text = ""  # everything the guest typed in this conversation (set by the orchestrator)
 
     async def run(self, name: str, raw_args: str) -> ToolOutcome:
         spec = SCHEMAS.get(name)
@@ -166,6 +176,9 @@ class ToolExecutor:
         guest = GuestDetails.model_validate(
             {k: args[k] for k in ("first_name", "last_name", "email", "phone", "special_requests") if args.get(k)}
         )
+        problem = check_guest_details_given(guest.email, self.guest_text)
+        if problem:
+            return ToolOutcome({"error": problem})
         record = await self.booking.create_quote(self.conversation.id, offer_id, guest)
         view = quote_view(record)
         return ToolOutcome(

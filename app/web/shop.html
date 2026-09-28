@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Answerly Travel Shopper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+  <style>
+    :root { --blue: #2663eb; --blue-d: #1d4ed8; --ink: #0f172a; --ink-2: #334155; --muted: #64748b; --line: #e2e8f0;
+      --soft: #f6f9fe; --ok: #15803d; --ok-bg: #f0fdf4; --warn: #c2410c; --warn-bg: #fff7ed; --bad: #b91c1c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 "DM Sans", "IBM Plex Sans Arabic", system-ui, sans-serif; color: var(--ink);
+      background: #fff; -webkit-font-smoothing: antialiased; }
+    button, input, select { font: inherit; color: inherit; }
+    .mono { font-family: "Geist Mono", ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+    .grid-bg { background-image: linear-gradient(rgba(38,99,235,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(38,99,235,.045) 1px, transparent 1px); background-size: 48px 48px; }
+    svg { width: 18px; height: 18px; flex: none; }
+    .orb { width: 26px; height: 26px; border-radius: 50%; flex: none;
+      background: radial-gradient(circle at 30% 28%, #fff 0 6%, #bfdbfe 16%, #60a5fa 42%, #2663eb 70%, #172554 100%);
+      box-shadow: inset 0 -3px 6px rgba(23,37,84,.35); }
+
+    nav { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line); }
+    nav .wrap { display: flex; align-items: center; gap: 22px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; text-decoration: none; color: inherit; }
+    .brand span { color: var(--blue); }
+    nav .links { margin-inline-start: auto; display: flex; gap: 20px; color: var(--ink-2); font-size: 14px; }
+    nav .links a { text-decoration: none; color: inherit; } nav .links a:hover { color: var(--blue); }
+
+    .hero { text-align: center; padding: 44px 0 26px; }
+    h1 { font-size: clamp(32px, 5vw, 56px); line-height: 1.05; letter-spacing: -.03em; margin: 12px auto 12px; max-width: 900px; }
+    h1 em { font-style: normal; color: var(--blue); }
+    .lead { color: var(--ink-2); max-width: 680px; margin: 0 auto 26px; font-size: 17px; }
+
+    form.search { display: grid; grid-template-columns: 1.4fr .8fr 1fr 1fr .9fr .9fr auto; gap: 0; background: #fff;
+      border: 1px solid var(--line); border-radius: 26px; box-shadow: 0 12px 34px rgba(15,23,42,.08); text-align: start;
+      overflow: hidden; }
+    .fld { padding: 10px 16px; border-inline-end: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .fld label { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+    .fld input, .fld select { border: 0; outline: none; padding: 2px 0; background: transparent; width: 100%; min-width: 0; font-weight: 500; }
+    .people { display: flex; align-items: center; gap: 8px; }
+    .people button { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: #fff; cursor: pointer; line-height: 1; }
+    form.search .go { margin: 8px; border: 0; border-radius: 999px; background: var(--blue); color: #fff; font-weight: 600;
+      padding: 0 26px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    form.search .go:hover { background: var(--blue-d); }
+    .ages { grid-column: 1 / -1; display: none; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; align-items: center; }
+    .ages.on { display: flex; }
+    .ages select { border: 1px solid var(--line); border-radius: 10px; padding: 4px 8px; }
+    @media (max-width: 900px) { form.search { grid-template-columns: 1fr 1fr; border-radius: 20px; }
+      .fld { border-bottom: 1px solid var(--line); } form.search .go { grid-column: 1 / -1; justify-content: center; padding: 12px; } }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px 0 0; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff;
+      border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+    .chip input { margin: 0; accent-color: var(--blue); }
+    .chip select, .chip input[type=number] { border: 0; outline: none; background: transparent; width: 88px; }
+    .chip.on { border-color: #93c5fd; color: var(--blue); background: #eff6ff; }
+
+    .sources { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 18px 0 4px; }
+    .src { font-size: 12.5px; border-radius: 999px; padding: 4px 10px; border: 1px dashed var(--line); color: var(--muted); }
+    .src.live { border-style: solid; border-color: #bbf7d0; color: var(--ok); background: var(--ok-bg); }
+    .src.sim { border-style: solid; border-color: #fed7aa; color: var(--warn); background: var(--warn-bg); }
+
+    main { display: grid; grid-template-columns: 1fr 380px; gap: 22px; padding: 20px 16px 120px; max-width: 1240px; margin: 0 auto; }
+    @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+    .summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .summary h2 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+    .summary .muted { color: var(--muted); font-size: 14px; }
+    .empty { border: 1px dashed var(--line); border-radius: 20px; padding: 36px; text-align: center; color: var(--muted); }
+
+    .hotel { border: 1px solid var(--line); border-radius: 22px; padding: 18px; margin-bottom: 14px; background: #fff;
+      box-shadow: 0 4px 14px rgba(15,23,42,.04); }
+    .hotel.focus { border-color: #93c5fd; box-shadow: 0 0 0 4px rgba(38,99,235,.12); }
+    .hrow { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: start; }
+    .hname { font-size: 18px; font-weight: 700; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .rank { font-size: 12px; background: var(--ink); color: #fff; border-radius: 999px; padding: 2px 9px; }
+    .meta { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+    .stars { color: #f59e0b; letter-spacing: 1px; }
+    .price { text-align: end; }
+    .price b { display: block; font-size: 26px; letter-spacing: -.02em; }
+    .price small { color: var(--muted); }
+    .save { display: inline-block; margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--ok); background: var(--ok-bg);
+      border-radius: 999px; padding: 2px 8px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13.5px; }
+    th { text-align: start; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+    td { padding: 8px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tr.best td { background: #f8fbff; }
+    td.num { text-align: end; font-weight: 600; white-space: nowrap; }
+    .tag { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+    .tag.ok { background: var(--ok-bg); color: var(--ok); } .tag.no { background: #f1f5f9; color: var(--ink-2); }
+    .tag.sim { background: var(--warn-bg); color: var(--warn); }
+    .pick { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+    .pick input { accent-color: var(--blue); width: 16px; height: 16px; }
+    a.site { color: var(--blue); font-weight: 600; text-decoration: none; white-space: nowrap; } a.site:hover { text-decoration: underline; }
+    .more { margin-top: 8px; border: 0; background: none; color: var(--blue); font-weight: 600; cursor: pointer; padding: 4px 0; }
+    @media (max-width: 640px) { .hrow { grid-template-columns: 1fr; } .price { text-align: start; } .hide-sm { display: none; } }
+
+    .bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 30; display: none; align-items: center; gap: 14px;
+      background: var(--ink); color: #fff; border-radius: 999px; padding: 10px 10px 10px 20px; box-shadow: 0 16px 40px rgba(15,23,42,.3);
+      max-width: calc(100vw - 24px); }
+    .bar.on { display: flex; }
+    @media (min-width: 1001px) { .bar { left: calc(50% - 200px); } }  /* keep clear of the chat panel */
+    .bar button { border: 0; border-radius: 999px; padding: 10px 18px; font-weight: 600; cursor: pointer; background: var(--blue); color: #fff; }
+    .bar .clear { background: transparent; color: #cbd5e1; padding: 10px 8px; }
+
+    aside.chat { position: sticky; top: 76px; align-self: start; height: calc(100vh - 96px); display: flex; flex-direction: column;
+      border: 1px solid var(--line); border-radius: 24px; overflow: hidden; background: #fff; box-shadow: 0 12px 34px rgba(15,23,42,.08); }
+    @media (max-width: 1000px) { aside.chat { position: static; height: 560px; } }
+    .chat header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .chat header b { display: block; } .chat header span { color: var(--muted); font-size: 12px; }
+    .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 9px; background: linear-gradient(var(--soft), #fff 160px); }
+    .msg { max-width: 88%; padding: 9px 13px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; }
+    .me { align-self: flex-end; background: var(--blue); color: #fff; border-end-end-radius: 5px; }
+    .ai { align-self: flex-start; background: #fff; border: 1px solid var(--line); border-end-start-radius: 5px; }
+    .staff { align-self: flex-start; background: #fff; border: 1px solid #bfdbfe; }
+    .note { align-self: center; color: var(--muted); font-size: 12px; text-align: center; }
+    .typing { align-self: flex-start; color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+    .dots { display: flex; gap: 3px; } .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--blue); animation: blink 1.2s infinite; }
+    .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+    .chat form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+    .chat input { flex: 1; border: 1px solid transparent; background: var(--soft); border-radius: 999px; padding: 10px 14px; outline: none; }
+    .chat input:focus { border-color: var(--blue); background: #fff; }
+    .chat form button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--blue); color: #fff; cursor: pointer;
+      display: grid; place-items: center; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    dialog { border: 0; border-radius: 24px; padding: 0; width: min(560px, calc(100vw - 24px)); box-shadow: 0 30px 70px rgba(15,23,42,.35); }
+    dialog::backdrop { background: rgba(15,23,42,.45); }
+    .dlg { padding: 22px; }
+    .dlg h3 { margin: 0 0 4px; font-size: 20px; }
+    .dlg .sub { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .dlg label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+    .dlg input { border: 1px solid var(--line); border-radius: 12px; padding: 9px 11px; outline: none; }
+    .dlg input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(38,99,235,.12); }
+    .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .btn { border: 0; border-radius: 999px; padding: 10px 18px; background: var(--blue); color: #fff; font-weight: 600; cursor: pointer; }
+    .btn.ghost { background: #fff; border: 1px solid var(--line); color: var(--ink-2); }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
+    .cmp { margin: 12px 0; font-size: 13.5px; }
+    .cmp div { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f1f5f9; }
+    .cmp .win { font-weight: 700; color: var(--ok); }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0; font-size: 14px; } dt { color: var(--muted); } dd { margin: 0; }
+    .total { display: flex; justify-content: space-between; font-weight: 700; font-size: 18px; border-top: 1px solid var(--line); padding-top: 10px; }
+    .result { border-radius: 16px; padding: 14px; background: var(--ok-bg); border: 1px solid #bbf7d0; color: #14532d; margin-top: 12px; }
+    .result.bad { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
+    footer { color: var(--muted); font-size: 13px; padding: 20px 16px 30px; border-top: 1px solid var(--line); text-align: center; }
+  </style>
+</head>
+<body>
+  <nav><div class="wrap">
+    <a class="brand" href="/shop"><span class="orb"></span>Answerly <span>Travel</span></a>
+    <div class="links"><a href="/">Hotel front desk demo</a><a href="/inbox">Staff inbox</a><a href="/docs">API</a></div>
+  </div></nav>
+
+  <header class="hero grid-bg"><div class="wrap">
+    <div class="mono" style="color:var(--muted)">Travel shopper · second business model</div>
+    <h1>Every booking site, one search.<br><em>The lowest price</em>, booked for you.</h1>
+    <p class="lead">We compare hotel prices across booking sites, re-check them before you pay, and can book the cheapest of the options you pick. Ask the assistant, or search below.</p>
+    <form class="search" id="search" autocomplete="off">
+      <div class="fld"><label for="city">Destination</label><input id="city" list="cities" placeholder="City" required value="Hurghada">
+        <datalist id="cities"><option>Hurghada</option><option>Sharm El Sheikh</option><option>Cairo</option><option>Dubai</option><option>Istanbul</option><option>Algiers</option></datalist></div>
+      <div class="fld"><label for="country">Country</label><select id="country">
+        <option value="EG">Egypt</option><option value="AE">United Arab Emirates</option><option value="TR">Turkey</option>
+        <option value="DZ">Algeria</option><option value="FR">France</option><option value="MA">Morocco</option>
+        <option value="TN">Tunisia</option><option value="SA">Saudi Arabia</option><option value="GB">United Kingdom</option>
+        <option value="US">United States</option></select></div>
+      <div class="fld"><label for="ci">Check-in</label><input id="ci" type="date" required></div>
+      <div class="fld"><label for="co">Check-out</label><input id="co" type="date" required></div>
+      <div class="fld"><label>Adults</label><div class="people"><button type="button" data-step="adults:-1">−</button><b id="adults">2</b><button type="button" data-step="adults:1">+</button></div></div>
+      <div class="fld"><label>Children</label><div class="people"><button type="button" data-step="kids:-1">−</button><b id="kids">0</b><button type="button" data-step="kids:1">+</button></div></div>
+      <button class="go" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>Search</button>
+      <div class="ages" id="ages"><span class="mono" style="color:var(--muted)">Children's ages</span></div>
+    </form>
+    <div class="filters">
+      <label class="chip">Max / night <input id="maxp" type="number" min="1" placeholder="any"></label>
+      <label class="chip">Stars <select id="stars"><option value="">any</option><option value="3">3+</option><option value="4">4+</option><option value="5">5</option></select></label>
+      <label class="chip"><input id="refund" type="checkbox"> Free cancellation</label>
+      <label class="chip">Sort <select id="sort"><option value="price">Lowest price</option><option value="rating">Best rated</option><option value="saving">Biggest saving</option></select></label>
+    </div>
+    <div class="sources" id="sources"></div>
+  </div></header>
+
+  <main>
+    <section>
+      <div class="summary"><h2 id="title">Search to compare prices</h2><span class="muted" id="subtitle"></span></div>
+      <div id="results"><div class="empty">Pick a destination and dates, then search. Results show the cheapest total first, with every site's price for each hotel.</div></div>
+    </section>
+    <aside class="chat">
+      <header><span class="orb"></span><div><b>Travel assistant</b><span class="mono">AI · online</span></div></header>
+      <div class="log" id="log"></div>
+      <form id="chatform"><input id="chatin" placeholder="e.g. cheapest 4-star in Dubai next weekend" autocomplete="off"><button type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></form>
+    </aside>
+  </main>
+
+  <div class="bar" id="bar"><span id="barText"></span><button class="clear" id="barClear" type="button">Clear</button><button id="barBook" type="button">Book the cheapest available</button></div>
+
+  <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
+
+  <footer>Demo. SimStay, DemoTrip, MockBooker and PriceWatch are simulated sites with fictional hotels; no real booking or payment happens with them.
+    Real sources connect with API keys: LiteAPI (bookable, sandbox) and Google Hotels prices via SerpApi (Booking.com, Expedia, Hotels.com and more). Booking.com and Expedia booking APIs require partner approval.</footer>
+
+<script>
+(() => {
+  const API = location.origin, SLUG = "travel", KEY = "answerly-travel-session";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const money = (v, c) => { try { return new Intl.NumberFormat("en", { style: "currency", currency: c || "USD" }).format(Number(v)); } catch { return `${v} ${c}`; } };
+  const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const state = { conv: null, token: null, search: null, selected: new Map(), busy: false, lastStaff: 0, sort: "price" };
+
+  // ---------- session ----------
+  async function session() {
+    if (state.conv) return;
+    try { Object.assign(state, JSON.parse(sessionStorage.getItem(KEY) || "{}")); } catch {}
+    if (state.conv) return;
+    const r = await fetch(`${API}/v1/properties/${SLUG}/sessions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const s = await r.json();
+    Object.assign(state, { conv: s.conversation_id, token: s.token });
+    try { sessionStorage.setItem(KEY, JSON.stringify({ conv: state.conv, token: state.token })); } catch {}
+  }
+  const auth = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${state.token}` });
+  async function post(path, body) {
+    await session();
+    const r = await fetch(`${API}${path}`, { method: "POST", headers: auth(), body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 429) throw new Error("Too many requests. Please wait a moment.");
+    if (!r.ok) { const d = data.detail; throw new Error(Array.isArray(d) ? d.map((x) => x.msg).join("; ") : d || r.statusText); }
+    return data;
+  }
+
+  // ---------- sources ----------
+  async function loadSources() {
+    const list = await (await fetch(`${API}/v1/properties/${SLUG}/shop/suppliers`)).json();
+    const box = $("sources"); box.replaceChildren();
+    for (const s of list) {
+      const cls = s.connected ? (s.simulated ? "src sim" : "src live") : "src";
+      const label = s.connected ? `${s.label}${s.simulated ? " · simulated" : ""}${s.bookable ? "" : " · compare only"}` : `${s.label} · ${s.note}`;
+      box.append(el("span", cls, label));
+    }
+  }
+
+  // ---------- search form ----------
+  const today = new Date();
+  $("ci").value = iso(new Date(today.getTime() + 14 * 864e5)); $("co").value = iso(new Date(today.getTime() + 17 * 864e5));
+  $("ci").min = iso(today);
+  $("ci").onchange = () => { const d = new Date($("ci").value + "T12:00"); d.setDate(d.getDate() + 1); $("co").min = iso(d); if ($("co").value <= $("ci").value) $("co").value = iso(d); };
+  const ages = [];
+  function renderAges() {
+    const box = $("ages"); box.querySelectorAll("select").forEach((s) => s.remove());
+    ages.forEach((a, i) => { const s = el("select"); for (let y = 0; y <= 17; y++) s.append(new Option(`${y} yrs`, y, false, y === a)); s.onchange = () => (ages[i] = +s.value); box.append(s); });
+    box.classList.toggle("on", ages.length > 0);
+  }
+  document.querySelectorAll("[data-step]").forEach((b) => b.onclick = () => {
+    const [what, d] = b.dataset.step.split(":"); const node = $(what); const v = Math.max(what === "adults" ? 1 : 0, Math.min(what === "adults" ? 8 : 4, +node.textContent + +d));
+    node.textContent = v; if (what === "kids") { while (ages.length < v) ages.push(8); ages.length = v; renderAges(); }
+  });
+  function formQuery() {
+    const q = { city: $("city").value.trim(), country_code: $("country").value, check_in: $("ci").value, check_out: $("co").value,
+      adults: +$("adults").textContent, children_ages: ages.slice(), refundable_only: $("refund").checked };
+    if ($("maxp").value) q.max_price_per_night = +$("maxp").value;
+    if ($("stars").value) q.min_stars = +$("stars").value;
+    return q;
+  }
+  $("search").onsubmit = async (e) => {
+    e.preventDefault();
+    const q = formQuery();
+    say("me", `${q.city} · ${q.check_in} → ${q.check_out} · ${q.adults} adult(s)${q.children_ages.length ? ` · ${q.children_ages.length} child(ren)` : ""}`);
+    typing(true, "Searching all sites");
+    $("results").replaceChildren(el("div", "empty", "Searching every connected site…"));
+    try { const data = await post(`/v1/conversations/${state.conv}/shop/search`, q); typing(false); say("ai", data.reply); showResults(data); }
+    catch (err) { typing(false); $("results").replaceChildren(el("div", "empty", err.message)); }
+  };
+  $("sort").onchange = () => { state.sort = $("sort").value; if (state.search) showResults(state.search); };
+
+  // ---------- results ----------
+  function stars(n) { return n ? "★".repeat(n) : ""; }
+  function showResults(data) {
+    state.search = data; state.selected.clear(); updateBar();
+    const q = data.query, nights = (new Date(q.check_out) - new Date(q.check_in)) / 864e5;
+    let hotels = data.hotels.slice();
+    if (state.sort === "rating") hotels.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    if (state.sort === "saving") hotels.sort((a, b) => +b.saving - +a.saving);
+    const ok = data.suppliers.filter((s) => s.status === "ok").length;
+    $("title").textContent = hotels.length ? `${data.total_hotels} hotels in ${q.city}` : `No hotels found in ${q.city}`;
+    $("subtitle").textContent = `${ok} of ${data.suppliers.length} sites answered · ${nights} night${nights > 1 ? "s" : ""} · totals include the whole stay`;
+    const box = $("results"); box.replaceChildren();
+    if (!hotels.length) { box.append(el("div", "empty", "Nothing matched. Try other dates, remove filters, or pick a nearby city.")); return; }
+    hotels.forEach((h, i) => box.append(hotelCard(h, i, nights)));
+  }
+  function hotelCard(h, i, nights) {
+    const card = el("article", "hotel"); card.id = `hotel-${h.hotel_id}`;
+    const row = el("div", "hrow"), left = el("div"), name = el("div", "hname");
+    name.append(el("span", "rank", `#${i + 1}`), el("span", null, h.name));
+    if (h.offers.some((o) => o.simulated)) name.append(el("span", "tag sim", "demo data"));
+    left.append(name, el("div", "meta", [stars(h.stars) && `${stars(h.stars)}`, h.rating && `${h.rating}/10`, h.reviews && `${h.reviews} reviews`, `${h.sites} site${h.sites > 1 ? "s" : ""}`].filter(Boolean).join(" · ")));
+    const price = el("div", "price"), cur = h.offers[0].currency;
+    price.append(el("small", null, `Best on ${h.best_source}`), el("b", null, money(h.best_total, cur)), el("small", null, `${money(h.per_night, cur)} / night`));
+    if (+h.saving > 0) { price.append(el("br")); price.append(el("span", "save", `Save ${money(h.saving, cur)} on the same room`)); }
+    if (h.best_bookable && h.best_bookable.source !== h.best_source) {
+      price.append(el("br")); price.append(el("small", null, `Book here from ${money(h.best_bookable.total, cur)} on ${h.best_bookable.source}`));
+    }
+    row.append(left, price); card.append(row);
+    const table = el("table"), head = el("tr");
+    ["Site", "Room", "Meals", "Cancellation", "Total", ""].forEach((t, j) => { const th = el("th", j === 2 || j === 3 ? "hide-sm" : null, t); head.append(th); });
+    table.append(head);
+    const offers = h.offers;
+    offers.forEach((o, j) => {
+      const tr = el("tr", j === 0 ? "best" : null); if (j >= 4) tr.hidden = true;
+      tr.append(el("td", null, o.source), el("td", null, o.room_name), el("td", "hide-sm", o.board || "—"));
+      const cancel = el("td", "hide-sm"); cancel.append(el("span", o.refundable === true ? "tag ok" : "tag no", o.refundable === true ? "Free cancellation" : o.refundable === false ? "Non-refundable" : "See site")); tr.append(cancel);
+      tr.append(el("td", "num", money(o.total, o.currency)));
+      const act = el("td", "num");
+      if (o.kind === "bookable") {
+        const lab = el("label", "pick"), cb = el("input"); cb.type = "checkbox"; cb.checked = state.selected.has(o.offer_id);
+        cb.onchange = () => { cb.checked ? state.selected.set(o.offer_id, { ...o, hotel: h.name }) : state.selected.delete(o.offer_id); updateBar(); };
+        lab.append(cb, el("span", null, "Select")); act.append(lab);
+      } else if (o.link) {
+        const a = el("a", "site", `Go to ${o.source} ↗`); a.href = o.link; a.target = "_blank"; a.rel = "noopener nofollow"; act.append(a);
+      } else act.append(el("span", "tag no", "Compare only"));
+      tr.append(act); table.append(tr);
+    });
+    card.append(table);
+    if (offers.length > 4) { const more = el("button", "more", `Show all ${offers.length} prices`); more.onclick = () => { table.querySelectorAll("tr[hidden]").forEach((r) => (r.hidden = false)); more.remove(); }; card.append(more); }
+    return card;
+  }
+  function updateBar() {
+    const n = state.selected.size;
+    $("bar").classList.toggle("on", n > 0);
+    if (!n) return;
+    const cheapest = [...state.selected.values()].sort((a, b) => +a.total - +b.total)[0];
+    $("barText").textContent = `${n} selected · cheapest ${money(cheapest.total, cheapest.currency)}`;
+    $("barBook").textContent = n > 1 ? "Book the cheapest available" : "Book this offer";
+  }
+  $("barClear").onclick = () => { state.selected.clear(); document.querySelectorAll(".pick input").forEach((c) => (c.checked = false)); updateBar(); };
+  $("barBook").onclick = () => detailsDialog([...state.selected.keys()]);
+
+  // ---------- booking dialog ----------
+  function detailsDialog(offerIds) {
+    const body = $("dlgBody"); body.replaceChildren();
+    body.append(el("h3", null, "Who is staying?"), el("div", "sub", offerIds.length > 1
+      ? `We'll re-check all ${offerIds.length} options and hold the cheapest one still available. Nothing is booked until you confirm.`
+      : "We'll re-check the price with the site. Nothing is booked until you confirm."));
+    const f = el("form"), g = el("div", "grid2");
+    const field = (lbl, type, auto) => { const l = el("label", null, lbl), i = el("input"); i.type = type; i.autocomplete = auto; i.required = true; l.append(i); return [l, i]; };
+    const [lf, first] = field("First name", "text", "given-name"), [ll, last] = field("Last name", "text", "family-name"), [le, email] = field("Email", "email", "email");
+    g.append(lf, ll); f.append(g); le.style.marginTop = "10px"; f.append(le);
+    const err = el("div", "err"); err.hidden = true; f.append(err);
+    const row = el("div", "row"), cancel = el("button", "btn ghost", "Cancel"), go = el("button", "btn", "Re-check prices");
+    cancel.type = "button"; cancel.onclick = () => $("dlg").close(); row.append(cancel, go); f.append(row);
+    f.onsubmit = async (e) => {
+      e.preventDefault(); err.hidden = true;
+      if (!first.value.trim() || !last.value.trim() || !email.checkValidity() || !email.value) { err.textContent = "Please fill in all fields."; err.hidden = false; return; }
+      go.disabled = true; go.textContent = "Re-checking…";
+      try {
+        const data = await post(`/v1/conversations/${state.conv}/shop/quote`, { offer_ids: offerIds, first_name: first.value.trim(), last_name: last.value.trim(), email: email.value.trim() });
+        say("ai", data.reply); quoteDialog(data.quote);
+      } catch (e2) { err.textContent = e2.message; err.hidden = false; go.disabled = false; go.textContent = "Re-check prices"; }
+    };
+    body.append(f); if (!$("dlg").open) $("dlg").showModal(); first.focus();
+  }
+  function quoteDialog(q) {
+    const body = $("dlgBody"); body.replaceChildren();
+    body.append(el("h3", null, "Best available price"), el("div", "sub", q.simulated ? "Demo data from a simulated site." : `Held with ${q.source}.`));
+    if (q.compared.length > 1) {
+      const cmp = el("div", "cmp");
+      q.compared.forEach((c) => { const d = el("div", c.offer_id && c.total === q.total && c.status === "available" && c.source === q.source ? "win" : null);
+        d.append(el("span", null, `${c.hotel} · ${c.source}`), el("span", null, c.status === "available" ? money(c.total, q.currency) : c.status.replace("_", " "))); cmp.append(d); });
+      body.append(el("div", "mono", "Re-checked options"), cmp);
+    }
+    const dl = el("dl"); const row = (k, v) => dl.append(el("dt", null, k), el("dd", null, v));
+    row("Hotel", q.hotel_name); row("Site", q.source); row("Room", `${q.room_name}${q.board ? " · " + q.board : ""}`);
+    row("Dates", `${q.check_in} → ${q.check_out}`); row("Guests", `${q.adults} adult(s)${q.children_ages.length ? " + " + q.children_ages.join(", ") : ""}`);
+    row("Cancellation", q.refundable === true ? "Free cancellation" : q.refundable === false ? "Non-refundable" : "See terms");
+    row("Guest", `${q.guest.first_name} ${q.guest.last_name} · ${q.guest.email}`);
+    if (q.searched_total !== q.total) row("Price change", `was ${money(q.searched_total, q.currency)} at search`);
+    const total = el("div", "total"); total.append(el("span", null, "Total"), el("span", null, money(q.total, q.currency)));
+    const actions = el("div", "row"), back = el("button", "btn ghost", "Close"), ok = el("button", "btn", "Confirm booking");
+    back.type = ok.type = "button"; back.onclick = () => $("dlg").close();
+    ok.onclick = async () => {
+      ok.disabled = true; ok.textContent = "Booking…";
+      try {
+        const r = await post(`/v1/conversations/${state.conv}/shop/confirm`, { quote_id: q.quote_id });
+        actions.remove();
+        const res = el("div", r.state === "CONFIRMED" ? "result" : "result bad");
+        res.append(el("b", null, r.state === "CONFIRMED" ? "Booking confirmed" : r.state === "UNKNOWN" ? "Checking with the site" : "Booking not completed"),
+          el("div", null, r.reference ? `Reference ${r.reference}${r.hotel_confirmation ? " · hotel " + r.hotel_confirmation : ""}` : r.detail || ""));
+        body.append(res); say("note", `Booking ${r.state.toLowerCase()}${r.reference ? " · " + r.reference : ""}`);
+        state.selected.clear(); updateBar();
+      } catch (e) { ok.disabled = false; ok.textContent = "Confirm booking"; body.append(el("div", "err", e.message)); }
+    };
+    actions.append(back, ok); body.append(dl, total, actions);
+    if (!$("dlg").open) $("dlg").showModal();
+  }
+
+  // ---------- chat ----------
+  const log = $("log"); let aiBubble = null, typingNode = null;
+  function say(kind, text) { const n = el("div", kind === "note" ? "note" : `msg ${kind}`, text); n.dir = "auto"; log.append(n); log.scrollTop = log.scrollHeight; return n; }
+  function typing(on, text) {
+    typingNode?.remove(); typingNode = null;
+    if (on) { typingNode = el("div", "typing"); const d = el("span", "dots"); d.innerHTML = "<i></i><i></i><i></i>"; typingNode.append(d, el("span", null, text || "Thinking")); log.append(typingNode); log.scrollTop = log.scrollHeight; }
+  }
+  function handle(e) {
+    switch (e.type) {
+      case "status": typing(true, e.text); break;
+      case "delta": typing(false); if (!aiBubble) aiBubble = say("ai", ""); aiBubble.textContent += e.text; log.scrollTop = log.scrollHeight; break;
+      case "rewrite": if (aiBubble) aiBubble.textContent = e.text; break;
+      case "hotels": aiBubble = null; showResults(e.search); fillForm(e.search.query); break;
+      case "compare": { const card = $(`hotel-${e.hotel.hotel_id}`); if (card) { card.classList.add("focus"); card.scrollIntoView({ behavior: "smooth", block: "center" }); card.querySelector(".more")?.click(); } break; }
+      case "shop_quote": aiBubble = null; quoteDialog(e.quote); break;
+      case "search_form": $("city").focus(); break;
+      case "handoff": say("note", "You're connected with our travel team. They will reply here."); break;
+      case "error": typing(false); say("ai", e.detail); break;
+      case "done": typing(false); aiBubble = null; break;
+    }
+  }
+  function fillForm(q) {
+    $("city").value = q.city; $("country").value = q.country_code; $("ci").value = q.check_in; $("co").value = q.check_out;
+    $("adults").textContent = q.adults; $("kids").textContent = q.children_ages.length; ages.length = 0; ages.push(...q.children_ages); renderAges();
+  }
+  $("chatform").onsubmit = async (e) => {
+    e.preventDefault(); const text = $("chatin").value.trim(); if (!text || state.busy) return;
+    $("chatin").value = ""; say("me", text); typing(true); state.busy = true; aiBubble = null;
+    try {
+      await session();
+      const r = await fetch(`${API}/v1/conversations/${state.conv}/messages`, { method: "POST", headers: auth(), body: JSON.stringify({ text, request_id: crypto.randomUUID() }) });
+      if (r.status === 429) throw new Error("Too many messages. Please wait a moment.");
+      if (!r.ok) throw new Error((await r.json()).detail || "Error");
+      const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+      for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true });
+        let i; while ((i = buf.indexOf("\n\n")) >= 0) { const block = buf.slice(0, i); buf = buf.slice(i + 2);
+          const line = block.split("\n").find((l) => l.startsWith("data: ")); if (line) handle(JSON.parse(line.slice(6))); } }
+    } catch (err) { typing(false); say("note", err.message); }
+    state.busy = false;
+  };
+  function suggestions() {
+    const row = el("div", "chips");
+    ["Cheapest hotel in Hurghada next weekend for 2", "4-star in Dubai under $200/night, 3 nights", "Family trip to Istanbul, 2 adults and a 7-year-old"].forEach((t) => {
+      const b = el("button", "chip", t); b.type = "button"; b.onclick = () => { $("chatin").value = t; $("chatform").requestSubmit(); }; row.append(b); });
+    log.append(row);
+  }
+  function live() {  // staff replies and typing, pushed
+    if (!window.EventSource) return;
+    const es = new EventSource(`${API}/v1/conversations/${state.conv}/events?token=${encodeURIComponent(state.token)}&after=${state.lastStaff}`);
+    es.addEventListener("message", (ev) => { const m = JSON.parse(ev.data); if (m.id > state.lastStaff) { state.lastStaff = m.id; say("staff", m.content); } });
+    es.addEventListener("state", (ev) => { const s = JSON.parse(ev.data); if (s.staff_typing) typing(true, "Travel team is typing"); else if (typingNode?.textContent.includes("team")) typing(false); });
+  }
+
+  (async () => {
+    await session(); loadSources().catch(() => {});
+    say("ai", "Hi! Tell me where and when you're travelling, or use the search bar. I'll compare every site and find the lowest price.");
+    suggestions(); live();
+  })();
+  window.Shop = { get busy() { return state.busy; }, state };
+})();
+</script>
+</body>
+</html>

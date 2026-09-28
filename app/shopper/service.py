@@ -87,11 +87,17 @@ class ShopService:
             for o in offers:
                 n += 1
                 o["offer_id"] = f"{search.id[:6]}-{n}"
-            totals = [Decimal(o["total"]) for o in offers]
-            entry.update(offers=offers, best_total=str(totals[0]), best_source=offers[0]["source"],
-                         sites=len({o["source"] for o in offers}),
-                         saving=str(max(totals) - totals[0]), per_night=str((totals[0] / query.nights).quantize(Decimal("0.01"))),
-                         bookable=any(o["kind"] == "bookable" for o in offers))
+            best = offers[0]
+            # Saving: the same room type on the most expensive site (not a suite vs a double room).
+            same_room = [Decimal(o["total"]) for o in offers if o["room_name"] == best["room_name"]]
+            bookable = [o for o in offers if o["kind"] == "bookable"]
+            entry.update(offers=offers, best_total=best["total"], best_source=best["source"],
+                         best_room=best["room_name"], sites=len({o["source"] for o in offers}),
+                         saving=str(max(same_room) - Decimal(best["total"])),
+                         per_night=str((Decimal(best["total"]) / query.nights).quantize(Decimal("0.01"))),
+                         bookable=bool(bookable),
+                         best_bookable=({"offer_id": bookable[0]["offer_id"], "total": bookable[0]["total"],
+                                         "source": bookable[0]["source"]} if bookable else None))
             hotels.append(entry)
         hotels.sort(key=lambda h: (Decimal(h["best_total"]), -(h.get("rating") or 0)))
         for i, h in enumerate(hotels, 1):

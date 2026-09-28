@@ -877,3 +877,32 @@ def test_shop_endpoints_refuse_hotel_conversations(client):
     r = client.post(f"/v1/conversations/{conv}/shop/search", headers=h,
                     json={"city": "Hurghada", "country_code": "EG", "adults": 2, **SHOP_DATES})
     assert r.status_code == 400
+
+
+def test_model_cannot_book_with_invented_guest_details(client):
+    conv, h = start(client)
+    script(client, [[call("search_availability", check_in=CHECK_IN, check_out=CHECK_OUT, adults=2)],
+                    [("text", "Here are the rooms.")]])
+    events = send(client, conv, h, f"Room for 2 from {CHECK_IN} to {CHECK_OUT}")
+    offer = next(e for e in events if e["type"] == "offers")["offers"][0]["offer_id"]
+    llm = script(client, [[call("prepare_booking", offer_id=offer, first_name="John", last_name="Doe",
+                                email="john.doe@example.com")], [("text", "May I have your name and email?")]])
+    events = send(client, conv, h, "Book the first one")  # the guest never gave a name or email
+    assert not any(e["type"] == "quote" for e in events)
+    assert "has not given these details" in llm.requests[1]["messages"][-1]["content"]
+
+
+def test_shopper_city_names_in_arabic_are_understood():
+    from app.shopper.contracts import StaySearch
+
+    q = StaySearch(city="الغردقة", country_code="eg", check_in=date(2026, 11, 5), check_out=date(2026, 11, 8))
+    assert q.city == "Hurghada" and q.country_code == "EG"
+
+
+def test_date_help_gives_weekend_dates():
+    from app.agent.orchestrator import date_help
+
+    text = date_help(date(2026, 9, 28))  # a Monday
+    assert "tomorrow is Tuesday 2026-09-29" in text
+    assert "this weekend is Friday 2026-10-02 to Sunday 2026-10-04" in text
+    assert "next weekend is Friday 2026-10-09" in text

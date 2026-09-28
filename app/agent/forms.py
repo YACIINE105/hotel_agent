@@ -37,6 +37,7 @@ async def run_form_step(session: AsyncSession, prop: Property, conv: Conversatio
                         guest_text: str) -> tuple[ToolOutcome, str]:
     executor = ToolExecutor(BookingService(session, prop, connector_for(prop)), conv)
     executor.offers = await _known_offers(session, conv)
+    executor.guest_text = json.dumps(args)  # the guest typed these details into the form
     outcome = await executor.run(tool, json.dumps(args))
     if "error" in outcome.result:
         raise AppError(outcome.result["error"], status_code=422, code="invalid_booking_step")

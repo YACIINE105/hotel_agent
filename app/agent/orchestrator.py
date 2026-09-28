@@ -11,7 +11,7 @@ import json
 import re
 import time
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -41,7 +41,7 @@ from app.providers import Providers
 HISTORY_LIMIT = 16
 
 RULES = """You are the virtual front desk of {hotel}. You speak only for this hotel and never recommend other hotels.
-Today in the hotel's timezone ({tz}) is {weekday} {today}. Resolve relative dates such as "next Friday" from this and state the exact dates you used.
+Today in the hotel's timezone ({tz}) is {weekday} {today}. {date_help} State the exact dates you used.
 Reply in {language} unless the guest writes in another language; then use theirs.
 Style: warm and brief. The first sentence answers directly. Usually 1-3 short sentences. Plain text only: no markdown, lists, or emojis, because replies may be spoken aloud.
 Hotel facts and documents below are the only source for hotel information. After a sentence that uses one, add its id in square brackets, for example [F:check_in]. If the information is missing, say you will check with the team and offer to connect the guest; do not guess.
@@ -64,6 +64,16 @@ HOTEL FACTS (one per line: [id] text):
 
 RELEVANT DOCUMENTS (general area information such as the local guide; not hotel policies or services):
 {documents}"""
+
+
+def date_help(today: date) -> str:
+    """Pre-computed dates: small models get relative dates wrong ("next weekend" became today)."""
+    tomorrow = today + timedelta(days=1)
+    friday = today + timedelta(days=(4 - today.weekday()) % 7 or 7) if today.weekday() != 4 else today
+    next_friday = friday + timedelta(days=7)
+    fmt = lambda d: f"{d.strftime('%A')} {d.isoformat()}"  # noqa: E731
+    return (f"Useful dates: tomorrow is {fmt(tomorrow)}; this weekend is {fmt(friday)} to "
+            f"{fmt(friday + timedelta(days=2))}; next weekend is {fmt(next_friday)} to {fmt(next_friday + timedelta(days=2))}.")
 
 
 def _knowledge_lines(items: list[dict]) -> str:
@@ -192,11 +202,13 @@ class TurnRunner:
         if self.shopper:
             system = SHOPPER_RULES.format(
                 brand=self.prop.name, weekday=today.strftime("%A"), today=today.date().isoformat(),
+                date_help=date_help(today.date()),
                 language=lang.NAMES.get(guest_lang, "English"), facts=_knowledge_lines(facts))
         else:
             system = RULES.format(
                 hotel=self.prop.name, tz=self.prop.timezone, weekday=today.strftime("%A"),
-                today=today.date().isoformat(), language=lang.NAMES.get(guest_lang, "English"),
+                today=today.date().isoformat(), date_help=date_help(today.date()),
+                language=lang.NAMES.get(guest_lang, "English"),
                 facts=_knowledge_lines(facts), documents=_knowledge_lines(documents),
             )
         messages = [{"role": "system", "content": system}] + [line for m in history for line in _history_lines(m)]
@@ -217,6 +229,8 @@ class TurnRunner:
             )
             tools = tool_definitions(connector.capabilities, text, booking_context) or None
 
+        # What the guest really typed: tools refuse guest details the guest never gave.
+        executor.guest_text = " ".join(m.content for m in history if m.sender == "guest") + " " + text
         answer, tool_log, meta = "", [], {}
         cite_filter, md_filter, chunker = CitationFilter(), MarkdownFilter(), SentenceChunker()
         guard = RepetitionGuard()

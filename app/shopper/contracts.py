@@ -18,6 +18,14 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+CITY_ALIASES = {
+    "الغردقة": "Hurghada", "الغردقه": "Hurghada", "hurghada": "Hurghada", "hourghada": "Hurghada",
+    "شرم الشيخ": "Sharm El Sheikh", "charm el cheikh": "Sharm El Sheikh", "القاهرة": "Cairo", "القاهره": "Cairo",
+    "le caire": "Cairo", "دبي": "Dubai", "إسطنبول": "Istanbul", "اسطنبول": "Istanbul", "istanbul": "Istanbul",
+    "الجزائر": "Algiers", "الجزائر العاصمة": "Algiers", "alger": "Algiers",
+}
+
+
 class StaySearch(Strict):
     city: str = Field(min_length=2, max_length=80)
     country_code: str = Field(min_length=2, max_length=2, description="ISO 3166-1 alpha-2, e.g. EG")
@@ -38,6 +46,7 @@ class StaySearch(Strict):
         if any(a < 0 or a > 17 for a in self.children_ages):
             raise ValueError("Child ages must be between 0 and 17")
         self.country_code = self.country_code.upper()
+        self.city = CITY_ALIASES.get(self.city.strip().casefold(), CITY_ALIASES.get(self.city.strip(), self.city.strip()))
         self.currency = self.currency.upper()
         return self
 
