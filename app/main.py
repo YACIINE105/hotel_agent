@@ -16,6 +16,7 @@ from app.config import Settings, get_settings
 from app.db import Base, make_engine, make_sessionmaker
 from app.errors import AppError, handle_app_error
 from app.providers import Providers
+from app.ratelimit import make_limiter
 from app.realtime import make_broker
 from app.seed import seed
 
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
         engine = make_engine(settings.database_url)
         app.state.sessionmaker = make_sessionmaker(engine)
         use_database(app.state.sessionmaker)  # simulator inventory shared by all workers
+        app.state.limiter = make_limiter(engine, app.state.sessionmaker, settings.rate_limits_enabled)
         # Several workers start at once: on Postgres, one at a time creates tables and seeds.
         async with engine.connect() as lock_conn:
             if engine.dialect.name == "postgresql":

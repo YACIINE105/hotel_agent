@@ -38,4 +38,10 @@ class Unavailable(AppError):
 
 
 async def handle_app_error(_: Request, exc: AppError):
-    return JSONResponse({"code": exc.code, "detail": exc.detail}, status_code=exc.status_code)
+    retry_after = getattr(exc, "retry_after", None)
+    body = {"code": exc.code, "detail": exc.detail}
+    headers = {}
+    if retry_after:
+        body["retry_after"] = retry_after
+        headers["Retry-After"] = str(retry_after)
+    return JSONResponse(body, status_code=exc.status_code, headers=headers)

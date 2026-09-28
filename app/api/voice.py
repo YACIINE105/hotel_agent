@@ -16,6 +16,7 @@ from app.agent import language as lang
 from app.agent.orchestrator import TurnRunner
 from app.api.deps import guest_context
 from app.errors import AppError, Unavailable
+from app.ratelimit import RateLimited
 from app.voice.pipeline import SequencedSpeaker
 
 router = APIRouter(prefix="/v1", tags=["voice"])
@@ -102,6 +103,11 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
                 audio.clear()
                 if not payload or mime not in AUDIO_TYPES:
                     await send({"type": "error", "detail": "No usable audio received"})
+                    continue
+                try:
+                    await app.state.limiter.hit("voice_conv", conversation_id)
+                except RateLimited as exc:
+                    await send({"type": "error", "detail": exc.detail, "retry_after": exc.retry_after})
                     continue
                 # The guest's chosen language guides recognition; dialects are guessed badly without it.
                 hint = data.get("language") if data.get("language") in languages else None

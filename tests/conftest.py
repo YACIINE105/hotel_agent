@@ -67,3 +67,10 @@ async def hotels(session):
     session.add_all([a, b])
     await session.commit()
     return a, b
+
+
+@pytest.fixture(autouse=True)
+def _reset_simulator():
+    """Apps switch the simulator to their database; never let that leak into the next test."""
+    yield
+    reset_fake_store()

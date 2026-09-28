@@ -191,3 +191,12 @@ class SimFlag(Base):
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), primary_key=True)
     name: Mapped[str] = mapped_column(String(60), primary_key=True)
     value: Mapped[str] = mapped_column(String(60))
+
+
+class RateLimitCounter(Base):
+    """Fixed-window request counters (used on Postgres so all workers share limits)."""
+
+    __tablename__ = "rate_limit_counters"
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)

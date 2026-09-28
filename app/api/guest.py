@@ -18,6 +18,7 @@ from app.api.deps import ProvidersDep, SessionDep, SettingsDep, bearer, guest_co
 from app.booking.registry import connector_for
 from app.booking.service import BookingService
 from app.models import Conversation, Message
+from app.ratelimit import client_ip
 from app.security import sign_guest_token
 
 router = APIRouter(prefix="/v1", tags=["guest"])
@@ -78,7 +79,8 @@ async def widget_config(slug: str, session: SessionDep):
 
 
 @router.post("/properties/{slug}/sessions", status_code=201)
-async def start_session(slug: str, data: SessionInput, session: SessionDep, settings: SettingsDep):
+async def start_session(slug: str, data: SessionInput, request: Request, session: SessionDep, settings: SettingsDep):
+    await request.app.state.limiter.hit("session_ip", client_ip(request, settings.trust_forwarded_for))
     prop = await property_by_slug(session, slug)
     language = data.language if data.language in prop.languages else prop.languages[0]
     conv = Conversation(property_id=prop.id, channel=data.channel, language=language)
@@ -100,9 +102,11 @@ def sse(event: dict) -> str:
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(conversation_id: str, data: MessageInput, request: Request,
                        settings: SettingsDep, providers: ProvidersDep, authorization: Auth = None):
-    # Validate before streaming so auth failures are ordinary HTTP errors.
+    # Validate before streaming so auth failures and rate limits are ordinary HTTP errors.
     async with request.app.state.sessionmaker() as session:
         await guest_context(session, settings, conversation_id, bearer(authorization))
+    await request.app.state.limiter.hit("message_conv", conversation_id)
+    await request.app.state.limiter.hit("message_ip", client_ip(request, settings.trust_forwarded_for))
 
     async def events():
         async with request.app.state.sessionmaker() as session:
@@ -134,10 +138,11 @@ async def list_messages(conversation_id: str, request: Request, session: Session
 
 
 @router.post("/conversations/{conversation_id}/bookings/confirm")
-async def confirm_booking(conversation_id: str, data: ConfirmInput, session: SessionDep,
+async def confirm_booking(conversation_id: str, data: ConfirmInput, request: Request, session: SessionDep,
                           settings: SettingsDep, authorization: Auth = None):
     """The only path that books: an explicit guest action bound to a quote in this conversation."""
     prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
+    await request.app.state.limiter.hit("booking_conv", conv.id)
     service = BookingService(session, prop, connector_for(prop))
     result = await service.confirm(conv.id, data.quote_id)
     note = f"Booking {result['state']}"
@@ -152,10 +157,11 @@ async def confirm_booking(conversation_id: str, data: ConfirmInput, session: Ses
 
 
 @router.post("/conversations/{conversation_id}/availability")
-async def search_availability(conversation_id: str, data: AvailabilityInput, session: SessionDep,
+async def search_availability(conversation_id: str, data: AvailabilityInput, request: Request, session: SessionDep,
                               settings: SettingsDep, authorization: Auth = None):
     """Booking form step 1: dates and guests -> live offers, without a model call."""
     prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
+    await request.app.state.limiter.hit("booking_conv", conv.id)
     ages = ", ".join(str(a) for a in data.children_ages)
     text = f"{data.check_in} → {data.check_out} · {data.adults} adult(s)" + (f" · children aged {ages}" if ages else "")
     outcome, reply = await run_form_step(session, prop, conv, "search_availability", data.model_dump(mode="json"), text)
@@ -163,10 +169,11 @@ async def search_availability(conversation_id: str, data: AvailabilityInput, ses
 
 
 @router.post("/conversations/{conversation_id}/quotes")
-async def create_quote(conversation_id: str, data: QuoteInput, session: SessionDep, settings: SettingsDep,
+async def create_quote(conversation_id: str, data: QuoteInput, request: Request, session: SessionDep, settings: SettingsDep,
                        authorization: Auth = None):
     """Booking form step 2: chosen offer + guest details -> booking summary to confirm."""
     prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
+    await request.app.state.limiter.hit("booking_conv", conv.id)
     text = f"{data.first_name} {data.last_name} · {data.email}"
     outcome, reply = await run_form_step(session, prop, conv, "prepare_booking",
                                          data.model_dump(exclude_none=True), text)

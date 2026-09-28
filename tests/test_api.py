@@ -755,3 +755,34 @@ def test_unsupported_free_claim_is_replaced_by_the_approved_fact(client):
     script(client, [[("text", "Yes, parking is free on site.")]])
     events = send(client, conv, h, "Is parking free?")
     assert not any(e["type"] == "rewrite" for e in events)
+
+
+# --- rate limits ---------------------------------------------------------------
+
+def test_session_creation_is_rate_limited_per_ip(client):
+    codes = [client.post("/v1/properties/atlas-bay/sessions", json={}).status_code for _ in range(22)]
+    assert codes[:20] == [201] * 20 and codes[20] == 429
+    r = client.post("/v1/properties/atlas-bay/sessions", json={})
+    assert r.json()["code"] == "rate_limited" and int(r.headers["Retry-After"]) >= 1
+
+
+def test_chat_messages_are_rate_limited_per_conversation(client):
+    conv, h = start(client)
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+    client.post(f"/v1/staff/conversations/{conv}/takeover", json={"paused": True}, headers=staff)  # no model calls
+    codes = [client.post(f"/v1/conversations/{conv}/messages", json={"text": f"hi {i}"}, headers=h).status_code
+             for i in range(16)]
+    assert codes[:15] == [200] * 15 and codes[15] == 429
+
+
+def test_rate_limits_can_be_disabled(db_url):
+    settings = Settings(_env_file=None, database_url=db_url, session_secret="x", seed_demo=False,
+                        rate_limits_enabled=False)
+    with TestClient(create_app(settings)) as c:
+        c.portal.call(_seed_into, c.app)
+        assert all(c.post("/v1/properties/atlas-bay/sessions", json={}).status_code == 201 for _ in range(25))
+
+
+async def _seed_into(app):
+    async with app.state.sessionmaker() as session:
+        await seed_test_hotels(session)

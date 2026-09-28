@@ -23,6 +23,7 @@
 
   const T = {
     en: {
+      slowDown: "You're sending messages very quickly. Please wait a moment and try again.",
       online: "AI concierge · online", placeholder: "Ask about rooms, services, or your booking",
       book: "Book a room", checkin: "Check-in time", facilities: "Pools & spa", human: "Talk to staff",
       qCheckin: "What time is check-in and check-out?", qFacilities: "What pools and spa facilities do you have?",
@@ -46,6 +47,7 @@
       childrenN: (n) => `${n} child${n === 1 ? "" : "ren"}`,
     },
     ar: {
+      slowDown: "أنت ترسل الرسائل بسرعة كبيرة. يرجى الانتظار قليلاً ثم المحاولة مرة أخرى.",
       online: "المساعد الذكي · متصل", placeholder: "اسأل عن الغرف أو الخدمات أو حجزك",
       book: "احجز غرفة", checkin: "موعد الوصول", facilities: "المسابح والسبا", human: "التحدث مع موظف",
       qCheckin: "ما هو موعد تسجيل الوصول والمغادرة؟", qFacilities: "ما هي المسابح ومرافق السبا لديكم؟",
@@ -68,6 +70,7 @@
       simulated: "نسخة تجريبية · التوفر والأسعار محاكاة", adultsN: (n) => `${n} بالغ`, childrenN: (n) => `${n} طفل`,
     },
     fr: {
+      slowDown: "Vous envoyez des messages très rapidement. Patientez un instant puis réessayez.",
       online: "Concierge IA · en ligne", placeholder: "Chambres, services ou réservation",
       book: "Réserver", checkin: "Heure d'arrivée", facilities: "Piscines et spa", human: "Parler à l'équipe",
       qCheckin: "À quelle heure sont l'arrivée et le départ ?", qFacilities: "Quelles piscines et quel spa proposez-vous ?",
@@ -284,6 +287,7 @@
   async function post(path, body) {
     const r = await fetch(`${API}${path}`, { method: "POST", headers: auth(), body: JSON.stringify(body) });
     const data = await r.json().catch(() => ({}));
+    if (r.status === 429) throw new Error(t.slowDown);
     if (!r.ok) {
       const d = data.detail;
       throw new Error(Array.isArray(d) ? d.map((x) => x.msg).join("; ") : d || r.statusText);
@@ -661,6 +665,7 @@
     try {
       const r = await fetch(`${API}/v1/conversations/${state.conv}/messages`, { method: "POST", headers: auth(),
         body: JSON.stringify({ text, request_id: crypto.randomUUID(), language: state.lang }) });
+      if (r.status === 429) throw new Error(t.slowDown);
       if (!r.ok) throw new Error((await r.json()).detail || "Error");
       const reader = r.body.getReader(), dec = new TextDecoder();
       let buf = "";

@@ -7,6 +7,7 @@ chat: each simulated guest opens a session and sends --turns FAQ questions one a
       Reports time to first text, total reply time (p50/p95), throughput, and errors.
 poll: simulated open widgets each poll /messages every 2 s (the fallback); reports latency.
 live: N open push streams (what the widget does now); staff replies to a sample, delivery latency.
+Run the target API with RATE_LIMITS_ENABLED=false: one load generator looks like one very busy visitor.
 """
 
 import argparse

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     session_secret: str = "dev-only-change-me"
     guest_session_minutes: int = 240
     seed_demo: bool = True
+    rate_limits_enabled: bool = True
+    # Only behind a trusted reverse proxy: take the client IP from X-Forwarded-For.
+    trust_forwarded_for: bool = False
 
     # Text model (OpenAI-compatible, OpenRouter by default).
     llm_base_url: str = "https://openrouter.ai/api/v1"
