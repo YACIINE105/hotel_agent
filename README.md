@@ -6,6 +6,8 @@ Product spec: `../CustomerSupport/HOTEL_AI_AGENT_PRODUCT_PLAN.md`. Build plan: `
 
 ## Run it
 
+Quickest: `./scripts/start_stack.sh` starts ASR, the local LLM, TTS, and the API in the right order, with logs in `.run/`.
+
 ```bash
 cp .env.example .env              # set LLM_API_KEY, LLM_MODEL, SESSION_SECRET
 uv sync
@@ -15,8 +17,8 @@ uv sync
 ./scripts/run_api.sh              # terminal 4: API + demo, port 8000
 ```
 
-- Guest demo: http://localhost:8000/ (append `?hotel=oran-medina` for the second hotel). The 🎙 button enters voice mode.
-- Staff inbox: http://localhost:8000/inbox. Demo keys: `demo-atlas-staff-key` and `demo-oran-staff-key`.
+- Guest demo: http://localhost:8000/ is a landing page for **Steigenberger ALDAU Beach Hotel, Hurghada**, with the widget. The hotel facts come from its official page; availability and prices are simulated. Book through the form (dates, adults, children's ages, then guest details, then Confirm), or chat and talk by voice with the mic button.
+- Staff inbox: http://localhost:8000/inbox, key `demo-aldau-staff-key`. It refreshes every 2 s. While staff type a reply, the guest sees "Hotel team is typing".
 - API docs: http://localhost:8000/docs
 - Tests: `uv run pytest`. Live check against the running servers: `uv run python scripts/smoke_live.py --voice`
 - Model latency benchmark: `uv run python scripts/bench_models.py moonshotai/kimi-k3:off deepseek/deepseek-v4.1-flash`

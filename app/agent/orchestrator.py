@@ -124,7 +124,9 @@ class TurnRunner:
                 yield event
             return
 
-        guest_lang = language or lang.detect(text)
+        # The message's own language wins over the widget's UI language: a guest may keep the
+        # English UI and type in Arabic. The UI language only decides for letterless input ("?", "2").
+        guest_lang = lang.detect(text) if any(c.isalpha() for c in text) else (language or self.conv.language or "en")
         self.conv.language = guest_lang
         self.session.add(Message(conversation_id=self.conv.id, property_id=self.prop.id, sender="guest", content=text))
         await self.session.commit()

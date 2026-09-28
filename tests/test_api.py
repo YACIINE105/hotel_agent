@@ -444,3 +444,16 @@ def test_default_seed_is_the_hurghada_hotel(tmp_path):
         assert c.get("/v1/properties/atlas-bay/widget-config").status_code == 404
         facts = c.get("/v1/staff/properties/steigenberger-aldau/facts", headers={"X-API-Key": "demo-aldau-staff-key"}).json()
         assert {f["language"] for f in facts} == {"en", "ar"}
+
+
+def test_message_language_beats_widget_ui_language(client):
+    from app.errors import Unavailable
+
+    async def broken(messages, tools=None):
+        raise Unavailable("down")
+        yield  # pragma: no cover
+
+    conv, h = start(client, language="en")
+    client.app.state.providers.stream_chat = broken
+    r = client.post(f"/v1/conversations/{conv}/messages", json={"text": "هل يوجد موقف سيارات؟", "language": "en"}, headers=h)
+    assert "عذراً" in r.text  # Arabic fallback although the UI language is English
