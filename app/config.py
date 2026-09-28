@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     # Text model (OpenAI-compatible, OpenRouter by default).
     llm_base_url: str = "https://openrouter.ai/api/v1"
+    # Optional comma-separated copies of the same server (round-robin + failover), e.g.
+    # LLM_BASE_URLS=http://gpu1:8003/v1,http://gpu2:8003/v1 ; same for ASR_BASE_URLS / TTS_BASE_URLS.
+    llm_base_urls: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
     llm_timeout_seconds: float = 60
@@ -37,9 +40,12 @@ class Settings(BaseSettings):
 
     # vLLM speech-to-text (Qwen3-ASR) and Kokoro text-to-speech, each in its own venv.
     asr_base_url: str = "http://localhost:8001/v1"
+    asr_base_urls: str = ""
     asr_model: str = "Qwen/Qwen3-ASR-0.6B"
     asr_api_key: str = ""
     tts_base_url: str = "http://localhost:8002/v1"
+    tts_base_urls: str = ""
+    tts_cache_mb: int = 32
     tts_model: str = "oddadmix/Kokoro-7M-Distill"
     tts_voice: str = "af_msa"
     tts_api_key: str = ""
