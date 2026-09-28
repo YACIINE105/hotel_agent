@@ -1,4 +1,5 @@
-"""Which hotel suppliers the travel shopper uses: real ones when keys are set, simulated for demos."""
+"""Which hotel suppliers the travel shopper uses: trivago (live, no key) by default; LiteAPI and
+SerpApi when keys are set; simulated sites only when explicitly enabled."""
 
 import httpx
 
@@ -6,10 +7,13 @@ from app.config import Settings
 from app.shopper.suppliers.google_hotels import GoogleHotelsSupplier
 from app.shopper.suppliers.liteapi import LiteApiSupplier
 from app.shopper.suppliers.simulated import simulated_suppliers
+from app.shopper.suppliers.trivago import TrivagoSupplier
 
 
 def build_suppliers(settings: Settings, client: httpx.AsyncClient) -> list:
     suppliers: list = []
+    if settings.shop_trivago:
+        suppliers.append(TrivagoSupplier(market=settings.shop_market))
     if settings.liteapi_key:
         suppliers.append(LiteApiSupplier(settings.liteapi_key, client, settings.liteapi_nationality,
                                          sandbox=settings.liteapi_sandbox))
@@ -26,6 +30,7 @@ def supplier_status(suppliers: list) -> list[dict]:
     rows = [{"name": s.name, "label": s.label, "bookable": s.bookable, "simulated": s.simulated, "connected": True}
             for s in suppliers if s.configured]
     for name, label, bookable, note in (
+        ("trivago", "trivago (live prices from Booking.com, Trip.com, hotel sites...)", False, "set SHOP_TRIVAGO=true"),
         ("liteapi", "LiteAPI (2M+ hotels, bookable)", True, "set LITEAPI_KEY (free sandbox)"),
         ("google_hotels", "Google Hotels: Booking.com, Expedia, Hotels.com prices", False, "set SERPAPI_KEY"),
         ("booking_demand", "Booking.com Demand API", True, "requires Booking.com affiliate approval"),

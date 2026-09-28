@@ -7,4 +7,6 @@ workers="${WORKERS:-1}"
 if [[ "$workers" -gt 1 ]] && ! grep -qE '^DATABASE_URL=postgresql' .env 2>/dev/null && [[ "${DATABASE_URL:-}" != postgresql* ]]; then
   echo "WORKERS=$workers needs Postgres; using 1 worker with SQLite" >&2; workers=1
 fi
-exec uv run uvicorn app.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --workers "$workers" "$@"
+# Open push streams (SSE) would otherwise hold a graceful shutdown open indefinitely.
+exec uv run uvicorn app.main:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --workers "$workers" \
+  --timeout-graceful-shutdown 5 "$@"

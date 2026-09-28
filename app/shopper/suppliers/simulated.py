@@ -93,7 +93,7 @@ class SimulatedSupplier:
                 supplier_offer_id=f"{hotel['key']}#{code}", room_name=room, board=board, refundable=refundable,
                 free_cancellation_until=(query.check_in.isoformat() + " 12:00") if refundable else None,
                 total=total, currency=query.currency,
-                link=None if self.bookable else f"https://example.com/pricewatch/{_h(hotel['key']) % 10**8}",
+                link=None,  # fictional site: no link (a placeholder URL confused real users)
                 simulated=True))
         return offers
 

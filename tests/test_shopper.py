@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -81,8 +82,9 @@ async def test_compare_only_offers_are_never_booked(shop):
 async def test_confirm_books_once_even_on_double_click(shop, session):
     svc, conv = shop
     s = await svc.search(conv, query())
-    offer = next(o["offer_id"] for h in s.results for o in h["offers"] if o["kind"] == "bookable")
-    q = await svc.quote_best_of(conv, [offer], GUEST)
+    # Several candidates: the simulator deterministically sells some out on re-check (by date).
+    offers = [o["offer_id"] for h in s.results for o in h["offers"] if o["kind"] == "bookable"][:6]
+    q = await svc.quote_best_of(conv, offers, GUEST)
     first = await svc.confirm(conv, q.id)
     second = await svc.confirm(conv, q.id)
     assert first["state"] == "CONFIRMED" and first["reference"] == second["reference"]
@@ -235,3 +237,83 @@ async def test_saving_compares_the_same_room_type(shop):
         assert Decimal(h["saving"]) == max(same) - Decimal(best["total"])
         if h["bookable"]:
             assert h["best_bookable"]["total"] == next(o["total"] for o in h["offers"] if o["kind"] == "bookable")
+
+
+# --- trivago (official MCP) against a real saved response ----------------------------------------
+
+import pathlib  # noqa: E402
+
+from app.shopper.suppliers.trivago import TrivagoSupplier, parse_price, parse_response  # noqa: E402
+
+FIXTURE = (pathlib.Path(__file__).parent / "fixtures" / "trivago_search.txt").read_text()
+
+
+def test_trivago_price_parsing():
+    assert parse_price("$1,234") == Decimal("1234")
+    assert parse_price("€331") == Decimal("331")
+    assert parse_price("EGP 12,345") == Decimal("12345")
+    assert parse_price(None) is None and parse_price("n/a") is None
+
+
+def test_trivago_response_parsing_ignores_the_instruction_text():
+    items = parse_response(FIXTURE)
+    assert len(items) == 4 and items[0]["accommodation_name"]
+    assert "system_message" not in json.dumps(items)  # only the data array is used
+
+
+async def test_trivago_search_maps_query_and_results():
+    sent = {}
+
+    async def fake_call(arguments):
+        sent.update(arguments)
+        return FIXTURE
+
+    sup = TrivagoSupplier(market="EG", call=fake_call)
+    q = query(children_ages=[7, 5], refundable_only=True, min_stars=4, currency="EUR")
+    hotels = await sup.search(q)
+    assert sent["query"] == "Hurghada" and sent["arrival"] == q.check_in.isoformat()
+    assert sent["children"] == 2 and sent["children_ages"] == "7-5" and sent["country"] == "EG"
+    assert sent["filters"] == {"freeCancellation": True} and sent["hotel_rating"] == {"4star": True, "5star": True}
+    raw = parse_response(FIXTURE)
+    first = hotels[0]
+    assert first.name == raw[0]["accommodation_name"] and first.provider == "trivago"
+    offer = first.offers[0]
+    assert offer.kind == "redirect" and offer.via == "trivago" and offer.source == raw[0]["advertisers"]
+    assert offer.total == parse_price(raw[0]["price_per_stay"]) and offer.link.startswith("https://")
+    assert offer.simulated is False and first.amenities
+
+
+async def test_live_search_service_with_trivago_adds_booking_and_expedia_links(session):
+    org = Organization(name="T", api_key_hash="2" * 64)
+    session.add(org)
+    await session.flush()
+    prop = Property(org_id=org.id, slug="t", name="T", connector={"type": "shopper"})
+    session.add(prop)
+    await session.flush()
+    conv = Conversation(property_id=prop.id)
+    session.add(conv)
+    await session.commit()
+
+    async def fake_call(arguments):
+        return FIXTURE
+
+    svc = ShopService(session, prop, [TrivagoSupplier(call=fake_call)])
+    s = await svc.search(conv.id, query())
+    labels = {link["label"] for link in s.results[0]["check_links"]}
+    assert labels == {"Booking.com", "Expedia", "Google Hotels"}
+    booking = next(l["url"] for l in s.results[0]["check_links"] if l["label"] == "Booking.com")
+    assert "booking.com/searchresults.html" in booking and "checkin=" in booking
+    assert all(not o["simulated"] for h in s.results for o in h["offers"])
+
+
+async def test_trivago_offers_cannot_be_booked_in_app(session, shop):
+    svc, conv = shop
+
+    async def fake_call(arguments):
+        return FIXTURE
+
+    svc = ShopService(svc.session, svc.prop, [TrivagoSupplier(call=fake_call)])
+    s = await svc.search(conv, query())
+    with pytest.raises(Exception) as exc:
+        await svc.quote_best_of(conv, [s.results[0]["offers"][0]["offer_id"]], GUEST)
+    assert "compare_only" in str(exc.value)

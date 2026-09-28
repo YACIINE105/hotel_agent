@@ -76,6 +76,21 @@
       box-shadow: 0 4px 14px rgba(15,23,42,.04); }
     .hotel.focus { border-color: #93c5fd; box-shadow: 0 0 0 4px rgba(38,99,235,.12); }
     .hrow { display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: start; }
+    .hbody { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: start; }
+    .thumb { width: 150px; height: 112px; object-fit: cover; border-radius: 14px; background: var(--soft); }
+    .hinfo { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .amen { font-size: 12.5px; }
+    .price .via { display: block; }
+    .price .save { margin-top: 6px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+    .linkbtn { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px;
+      font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none; }
+    .linkbtn:hover { border-color: #93c5fd; color: var(--blue); }
+    .linkbtn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .linkbtn.primary:hover { background: var(--blue-d); color: #fff; }
+    .also { color: var(--muted); font-size: 12.5px; margin-inline-start: 4px; }
+    .credit { margin-inline-start: auto; color: var(--muted); font-size: 12px; }
+    @media (max-width: 640px) { .hbody { grid-template-columns: 1fr; } .thumb { width: 100%; height: 170px; } }
     .hname { font-size: 18px; font-weight: 700; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .rank { font-size: 12px; background: var(--ink); color: #fff; border-radius: 999px; padding: 2px 9px; }
     .meta { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
@@ -161,8 +176,8 @@
 
   <header class="hero grid-bg"><div class="wrap">
     <div class="mono" style="color:var(--muted)">Travel shopper · second business model</div>
-    <h1>Every booking site, one search.<br><em>The lowest price</em>, booked for you.</h1>
-    <p class="lead">We compare hotel prices across booking sites, re-check them before you pay, and can book the cheapest of the options you pick. Ask the assistant, or search below.</p>
+    <h1>Every booking site, one search.<br><em>The lowest price</em>, found in seconds.</h1>
+    <p class="lead">Live hotel prices from booking sites, found through trivago, with one-click checks on Booking.com, Expedia and Google Hotels. Ask the assistant, or search below.</p>
     <form class="search" id="search" autocomplete="off">
       <div class="fld"><label for="city">Destination</label><input id="city" list="cities" placeholder="City" required value="Hurghada">
         <datalist id="cities"><option>Hurghada</option><option>Sharm El Sheikh</option><option>Cairo</option><option>Dubai</option><option>Istanbul</option><option>Algiers</option></datalist></div>
@@ -182,6 +197,7 @@
       <label class="chip">Max / night <input id="maxp" type="number" min="1" placeholder="any"></label>
       <label class="chip">Stars <select id="stars"><option value="">any</option><option value="3">3+</option><option value="4">4+</option><option value="5">5</option></select></label>
       <label class="chip"><input id="refund" type="checkbox"> Free cancellation</label>
+      <label class="chip">Currency <select id="cur"><option>USD</option><option>EUR</option><option>EGP</option><option>AED</option><option>SAR</option><option>GBP</option><option>TRY</option></select></label>
       <label class="chip">Sort <select id="sort"><option value="price">Lowest price</option><option value="rating">Best rated</option><option value="saving">Biggest saving</option></select></label>
     </div>
     <div class="sources" id="sources"></div>
@@ -203,8 +219,8 @@
 
   <dialog id="dlg"><div class="dlg" id="dlgBody"></div></dialog>
 
-  <footer>Demo. SimStay, DemoTrip, MockBooker and PriceWatch are simulated sites with fictional hotels; no real booking or payment happens with them.
-    Real sources connect with API keys: LiteAPI (bookable, sandbox) and Google Hotels prices via SerpApi (Booking.com, Expedia, Hotels.com and more). Booking.com and Expedia booking APIs require partner approval.</footer>
+  <footer>Live prices via trivago's official AI connector: each hotel shows its cheapest current deal and the site offering it; you book on that site.
+    "Also check" links open Booking.com, Expedia and Google Hotels searches for the same stay. In-app booking needs a connected booking API (LiteAPI key); Booking.com and Expedia booking APIs require partner approval.</footer>
 
 <script>
 (() => {
@@ -263,7 +279,7 @@
   });
   function formQuery() {
     const q = { city: $("city").value.trim(), country_code: $("country").value, check_in: $("ci").value, check_out: $("co").value,
-      adults: +$("adults").textContent, children_ages: ages.slice(), refundable_only: $("refund").checked };
+      adults: +$("adults").textContent, children_ages: ages.slice(), refundable_only: $("refund").checked, currency: $("cur").value };
     if ($("maxp").value) q.max_price_per_night = +$("maxp").value;
     if ($("stars").value) q.min_stars = +$("stars").value;
     return q;
@@ -289,45 +305,71 @@
     if (state.sort === "saving") hotels.sort((a, b) => +b.saving - +a.saving);
     const ok = data.suppliers.filter((s) => s.status === "ok").length;
     $("title").textContent = hotels.length ? `${data.total_hotels} hotels in ${q.city}` : `No hotels found in ${q.city}`;
-    $("subtitle").textContent = `${ok} of ${data.suppliers.length} sites answered · ${nights} night${nights > 1 ? "s" : ""} · totals include the whole stay`;
+    const sites = [...new Set(data.hotels.flatMap((h) => h.offers.map((o) => o.source)))].slice(0, 5);
+    const via = data.suppliers.filter((s) => s.status === "ok").map((s) => s.label).join(", ");
+    $("subtitle").textContent = `Live prices via ${via || "no source"}${sites.length ? " from " + sites.join(", ") : ""} · ${nights} night${nights > 1 ? "s" : ""}, total for the stay`;
     const box = $("results"); box.replaceChildren();
     if (!hotels.length) { box.append(el("div", "empty", "Nothing matched. Try other dates, remove filters, or pick a nearby city.")); return; }
     hotels.forEach((h, i) => box.append(hotelCard(h, i, nights)));
   }
+  function linkBtn(label, url, primary) {
+    const a = el("a", primary ? "linkbtn primary" : "linkbtn", label); a.href = url; a.target = "_blank"; a.rel = "noopener nofollow"; return a;
+  }
+  function selectBox(o, h) {
+    const lab = el("label", "pick"), cb = el("input"); cb.type = "checkbox"; cb.checked = state.selected.has(o.offer_id);
+    cb.onchange = () => { cb.checked ? state.selected.set(o.offer_id, { ...o, hotel: h.name }) : state.selected.delete(o.offer_id); updateBar(); };
+    lab.append(cb, el("span", null, "Select to book here")); return lab;
+  }
   function hotelCard(h, i, nights) {
     const card = el("article", "hotel"); card.id = `hotel-${h.hotel_id}`;
-    const row = el("div", "hrow"), left = el("div"), name = el("div", "hname");
+    const cur = h.offers[0].currency, best = h.offers[0];
+    const body = el("div", "hbody");
+    if (h.image) { const img = el("img", "thumb"); img.src = h.image; img.alt = h.name; img.loading = "lazy"; body.append(img); }
+    const info = el("div", "hinfo"), name = el("div", "hname");
     name.append(el("span", "rank", `#${i + 1}`), el("span", null, h.name));
     if (h.offers.some((o) => o.simulated)) name.append(el("span", "tag sim", "demo data"));
-    left.append(name, el("div", "meta", [stars(h.stars) && `${stars(h.stars)}`, h.rating && `${h.rating}/10`, h.reviews && `${h.reviews} reviews`, `${h.sites} site${h.sites > 1 ? "s" : ""}`].filter(Boolean).join(" · ")));
-    const price = el("div", "price"), cur = h.offers[0].currency;
-    price.append(el("small", null, `Best on ${h.best_source}`), el("b", null, money(h.best_total, cur)), el("small", null, `${money(h.per_night, cur)} / night`));
-    if (+h.saving > 0) { price.append(el("br")); price.append(el("span", "save", `Save ${money(h.saving, cur)} on the same room`)); }
-    if (h.best_bookable && h.best_bookable.source !== h.best_source) {
-      price.append(el("br")); price.append(el("small", null, `Book here from ${money(h.best_bookable.total, cur)} on ${h.best_bookable.source}`));
+    info.append(name);
+    // One field per line (trivago's presentation rules for its results).
+    if (h.stars) info.append(el("div", "meta", `${stars(h.stars)} ${h.stars}-star`));
+    if (h.rating) info.append(el("div", "meta", `Guest rating ${h.rating}/10${h.reviews ? ` (${h.reviews.toLocaleString()} reviews)` : ""}`));
+    if (h.address) info.append(el("div", "meta", h.address));
+    if (h.amenities?.length) info.append(el("div", "meta amen", h.amenities.slice(0, 8).join(" · ")));
+    const price = el("div", "price");
+    price.append(el("b", null, money(h.best_total, cur)), el("small", null, `for ${nights} night${nights > 1 ? "s" : ""} · ${money(h.per_night, cur)} / night`),
+      el("small", "via", `on ${best.source}${best.via ? " via " + best.via : ""}`));
+    if (+h.saving > 0) price.append(el("span", "save", `Save ${money(h.saving, cur)} on the same room`));
+    body.append(info, price); card.append(body);
+
+    const actions = el("div", "actions");
+    if (h.offers.length === 1) {
+      if (best.kind === "bookable") actions.append(selectBox(best, h));
+      else if (best.link) actions.append(linkBtn(best.via === "trivago" ? "View on trivago →" : `Go to ${best.source} →`, best.link, true));
     }
-    row.append(left, price); card.append(row);
-    const table = el("table"), head = el("tr");
-    ["Site", "Room", "Meals", "Cancellation", "Total", ""].forEach((t, j) => { const th = el("th", j === 2 || j === 3 ? "hide-sm" : null, t); head.append(th); });
-    table.append(head);
-    const offers = h.offers;
-    offers.forEach((o, j) => {
-      const tr = el("tr", j === 0 ? "best" : null); if (j >= 4) tr.hidden = true;
-      tr.append(el("td", null, o.source), el("td", null, o.room_name), el("td", "hide-sm", o.board || "—"));
-      const cancel = el("td", "hide-sm"); cancel.append(el("span", o.refundable === true ? "tag ok" : "tag no", o.refundable === true ? "Free cancellation" : o.refundable === false ? "Non-refundable" : "See site")); tr.append(cancel);
-      tr.append(el("td", "num", money(o.total, o.currency)));
-      const act = el("td", "num");
-      if (o.kind === "bookable") {
-        const lab = el("label", "pick"), cb = el("input"); cb.type = "checkbox"; cb.checked = state.selected.has(o.offer_id);
-        cb.onchange = () => { cb.checked ? state.selected.set(o.offer_id, { ...o, hotel: h.name }) : state.selected.delete(o.offer_id); updateBar(); };
-        lab.append(cb, el("span", null, "Select")); act.append(lab);
-      } else if (o.link) {
-        const a = el("a", "site", `Go to ${o.source} ↗`); a.href = o.link; a.target = "_blank"; a.rel = "noopener nofollow"; act.append(a);
-      } else act.append(el("span", "tag no", "Compare only"));
-      tr.append(act); table.append(tr);
-    });
-    card.append(table);
-    if (offers.length > 4) { const more = el("button", "more", `Show all ${offers.length} prices`); more.onclick = () => { table.querySelectorAll("tr[hidden]").forEach((r) => (r.hidden = false)); more.remove(); }; card.append(more); }
+    if (h.check_links?.length) {
+      const also = el("span", "also", "Also check live prices:");
+      actions.append(also, ...h.check_links.map((l) => linkBtn(l.label, l.url, false)));
+    }
+    if (h.provider === "trivago") actions.append(el("span", "credit", "Powered by trivago"));
+    card.append(actions);
+
+    if (h.offers.length > 1) {  // several sources for this hotel (e.g. Google Hotels, LiteAPI): compare them
+      const table = el("table"), head = el("tr");
+      ["Site", "Room", "Meals", "Cancellation", "Total", ""].forEach((t, j) => head.append(el("th", j === 2 || j === 3 ? "hide-sm" : null, t)));
+      table.append(head);
+      h.offers.forEach((o, j) => {
+        const tr = el("tr", j === 0 ? "best" : null); if (j >= 4) tr.hidden = true;
+        tr.append(el("td", null, o.source), el("td", null, o.room_name), el("td", "hide-sm", o.board || "—"));
+        const cancel = el("td", "hide-sm"); cancel.append(el("span", o.refundable === true ? "tag ok" : "tag no", o.refundable === true ? "Free cancellation" : o.refundable === false ? "Non-refundable" : "See site")); tr.append(cancel);
+        tr.append(el("td", "num", money(o.total, o.currency)));
+        const act = el("td", "num");
+        if (o.kind === "bookable") act.append(selectBox(o, h));
+        else if (o.link) act.append(linkBtn(`Go to ${o.source} ↗`, o.link, false));
+        else act.append(el("span", "tag no", "Compare only"));
+        tr.append(act); table.append(tr);
+      });
+      card.append(table);
+      if (h.offers.length > 4) { const more = el("button", "more", `Show all ${h.offers.length} prices`); more.onclick = () => { table.querySelectorAll("tr[hidden]").forEach((r) => (r.hidden = false)); more.remove(); }; card.append(more); }
+    }
     return card;
   }
   function updateBar() {
@@ -441,7 +483,7 @@
   };
   function suggestions() {
     const row = el("div", "chips");
-    ["Cheapest hotel in Hurghada next weekend for 2", "4-star in Dubai under $200/night, 3 nights", "Family trip to Istanbul, 2 adults and a 7-year-old"].forEach((t) => {
+    ["Cheapest hotel in Hurghada next weekend for 2 adults", "4-star in Dubai under $200/night, 3 nights, 2 adults", "Istanbul next weekend, 2 adults and a 7-year-old"].forEach((t) => {
       const b = el("button", "chip", t); b.type = "button"; b.onclick = () => { $("chatin").value = t; $("chatform").requestSubmit(); }; row.append(b); });
     log.append(row);
   }

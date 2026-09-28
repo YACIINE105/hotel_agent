@@ -35,8 +35,10 @@ def call(name, **args):
 
 @pytest.fixture
 def client(db_url):
-    settings = Settings(_env_file=None, database_url=db_url,
-                        llm_api_key="test", llm_model="fake-model", session_secret="test-secret", seed_demo=False)
+    # Tests never reach the network: simulated shopping sites instead of live trivago.
+    settings = Settings(_env_file=None, database_url=db_url, llm_api_key="test", llm_model="fake-model",
+                        session_secret="test-secret", seed_demo=False, shop_trivago=False,
+                        shop_simulated_suppliers=True)
     with TestClient(create_app(settings)) as c:
         async def seed():
             async with c.app.state.sessionmaker() as session:

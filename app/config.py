@@ -58,8 +58,10 @@ class Settings(BaseSettings):
     liteapi_sandbox: bool = True     # live booking needs a payment integration first
     liteapi_nationality: str = "US"  # guestNationality sent with searches
     serpapi_key: str = ""            # Google Hotels prices across Booking.com, Expedia, ...
-    shop_simulated_suppliers: bool = True
-    shop_supplier_timeout: float = 12
+    shop_trivago: bool = True        # live prices via trivago's official MCP server (no key)
+    shop_market: str = "US"          # trivago market (pricing/content), ISO country code
+    shop_simulated_suppliers: bool = False  # demo sites with fictional hotels (tests/offline demos only)
+    shop_supplier_timeout: float = 20
 
     @property
     def llm_configured(self) -> bool:

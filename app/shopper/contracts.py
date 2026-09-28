@@ -67,6 +67,7 @@ class SupplierOffer(Strict):
     total: Decimal
     currency: str
     link: str | None = None          # redirect offers: continue on the provider's site
+    via: str | None = None           # metasearch that found the deal, e.g. "trivago"
     simulated: bool = False
 
 
@@ -80,6 +81,8 @@ class HotelResult(Strict):
     latitude: float | None = None
     longitude: float | None = None
     image: str | None = None
+    amenities: list[str] = Field(default_factory=list)
+    provider: str | None = None      # data provider to credit on the card, e.g. "trivago"
     offers: list[SupplierOffer] = Field(default_factory=list)
 
 

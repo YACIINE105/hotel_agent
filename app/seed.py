@@ -8,11 +8,11 @@ hotel's systems exists. This is an independent demo, not affiliated with the hot
 import json
 import pathlib
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.knowledge.service import KnowledgeService
-from app.models import KnowledgeChunk, Organization, Property
+from app.models import HotelFact, KnowledgeChunk, Organization, Property
 from app.security import hash_api_key
 
 DEMO_KEY = "demo-aldau-staff-key"
@@ -152,11 +152,13 @@ TRAVEL_FACTS = {
               "cheapest that is still available.",
         "ar": "يمكنك اختيار عدة عروض وطلب حجز الأرخص: نعيد التحقق منها جميعاً ونختار الأرخص المتاح.",
     },
-    "demo": {
-        "en": "This is a demo. SimStay, DemoTrip, MockBooker and PriceWatch are simulated sites, and their hotels are "
-              "fictional; no real booking or payment happens.",
-        "ar": "هذه نسخة تجريبية. مواقع SimStay وDemoTrip وMockBooker وPriceWatch محاكاة وفنادقها خيالية، ولا يتم أي حجز أو "
-              "دفع حقيقي.",
+    "sources": {
+        "en": "Prices are live and come from booking sites through trivago (for example Booking.com, Trip.com and "
+              "hotels' own websites). Each hotel shows its cheapest current deal; you complete the booking on that "
+              "site. You can also check the same stay on Booking.com, Expedia and Google Hotels.",
+        "ar": "الأسعار مباشرة ومصدرها مواقع الحجز عبر تريفاغو (مثل Booking.com وTrip.com ومواقع الفنادق نفسها). يظهر لكل "
+              "فندق أرخص عرض حالي، وتكمل الحجز على ذلك الموقع. ويمكنك أيضاً التحقق من نفس الإقامة على Booking.com "
+              "وExpedia وGoogle Hotels.",
     },
     "support": {
         "en": "Our travel team can take over any conversation; just ask to talk to a person.",
@@ -167,7 +169,16 @@ TRAVEL_FACTS = {
 
 async def ensure_travel_shopper(session: AsyncSession) -> None:
     """Second business model: a travel agency whose agent shops many sites for the lowest price."""
-    if await session.scalar(select(Property).where(Property.slug == TRAVEL_SLUG)):
+    existing = await session.scalar(select(Property).where(Property.slug == TRAVEL_SLUG))
+    if existing:
+        # Keep the agency's facts in sync with the code (e.g. demo -> live sources).
+        knowledge = KnowledgeService(session, None, existing.id)
+        await session.execute(delete(HotelFact).where(HotelFact.property_id == existing.id,
+                                                      HotelFact.key.not_in(list(TRAVEL_FACTS))))
+        for key, by_lang in TRAVEL_FACTS.items():
+            for language, content in by_lang.items():
+                await knowledge.upsert_fact(key, language, content)
+        await session.commit()
         return
     org = Organization(name="Answerly Travel (demo)", api_key_hash=hash_api_key(TRAVEL_KEY))
     session.add(org)

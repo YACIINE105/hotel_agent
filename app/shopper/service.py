@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import AppError, Conflict, NotFound
 from app.models import Handoff, Property, ShopBooking, ShopQuote, ShopSearch
+from app.shopper.deeplinks import check_links
 from app.shopper.contracts import Guest, HotelResult, Recheck, ShopTerms, StaySearch, SupplierOffer
 
 QUOTE_TTL = timedelta(minutes=10)
@@ -65,10 +66,11 @@ class ShopService:
             for hotel in results:
                 key = merge_key(hotel.name)
                 entry = merged.setdefault(key, {**hotel.model_dump(mode="json", exclude={"offers"}), "offers": []})
-                for field in ("stars", "rating", "reviews", "image", "address", "latitude", "longitude"):
+                for field in ("stars", "rating", "reviews", "image", "address", "latitude", "longitude", "provider"):
                     if entry.get(field) in (None, "") and getattr(hotel, field) not in (None, ""):
                         entry[field] = getattr(hotel, field)
                 entry["offers"] += [o.model_dump(mode="json") for o in hotel.offers]
+                entry["amenities"] = entry.get("amenities") or hotel.amenities
 
         search = ShopSearch(property_id=self.prop.id, conversation_id=conversation_id,
                             query=query.model_dump(mode="json"), results=[], suppliers=[s for _, s in outcomes])
@@ -99,6 +101,9 @@ class ShopService:
                          best_bookable=({"offer_id": bookable[0]["offer_id"], "total": bookable[0]["total"],
                                          "source": bookable[0]["source"]} if bookable else None))
             hotels.append(entry)
+        for h in hotels:
+            # Real hotels: links to check the same stay on Booking.com / Expedia / Google (their live prices).
+            h["check_links"] = [] if all(o.get("simulated") for o in h["offers"]) else check_links(h["name"], query)
         hotels.sort(key=lambda h: (Decimal(h["best_total"]), -(h.get("rating") or 0)))
         for i, h in enumerate(hotels, 1):
             h["hotel_id"] = f"H{i}"

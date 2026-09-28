@@ -3,7 +3,7 @@
 Two AI products on one platform:
 
 1. **Hotel front desk** — a hotel's own multilingual agent. It answers from hotel-approved facts and a local area guide, searches availability, prepares bookings the guest confirms, talks by voice, and hands off to staff. Demo: Steigenberger ALDAU Beach Hotel, Hurghada (real facts from the official page; **availability and prices simulated**).
-2. **Travel shopper** — a travel agent that searches many booking sources at once for the lowest price and can book the cheapest of several options the guest picks. Demo brand: Answerly Travel (simulated sites with fictional hotels; real sources connect with API keys).
+2. **Travel shopper** — a travel agent that searches booking sites for the lowest price. Brand: Answerly Travel. **Live prices via trivago's official MCP server** (Booking.com, Expedia, Hotels.com, Trip.com, hotel sites…), plus links to check each stay on Booking.com, Expedia and Google Hotels. In-app booking of the cheapest of several options works with a bookable source (LiteAPI key).
 
 Everything runs locally: FastAPI app (several workers), Postgres 16, and three model servers on one 6 GB GPU plus CPU.
 
@@ -98,7 +98,8 @@ app/
     service.py       Parallel fan-out, merge, rank, same-room savings, best-of re-check, idempotent confirm
     tools.py         Shopper prompt + tools (search_stays, compare_prices, prepare_booking)
     registry.py      Which suppliers are active; status for the page
-    suppliers/       liteapi.py (bookable), google_hotels.py (SerpApi, compare-only), simulated.py
+    suppliers/       trivago.py (live, MCP), liteapi.py (bookable), google_hotels.py (SerpApi), simulated.py (tests)
+    deeplinks.py     Booking.com / Expedia / Google Hotels search links for a hotel and dates
   voice/pipeline.py  SequencedSpeaker: parallel TTS, strictly ordered audio
   web/               widget.js, demo.html, shop.html, inbox.html
 data/area_guide/     20 Wikipedia articles (EN+AR, CC BY-SA) = area knowledge + RAG test corpus
@@ -174,10 +175,14 @@ sequenceDiagram
 
 | Source | Kind | How to enable |
 |---|---|---|
-| LiteAPI (2M+ hotels) | Bookable; sandbox books without charging | `LITEAPI_KEY` (free sandbox key) |
-| Google Hotels via SerpApi: Booking.com, Expedia, Hotels.com and more | Compare-only; the guest continues on the site | `SERPAPI_KEY` |
-| SimStay, DemoTrip, MockBooker, PriceWatch | Simulated, fictional hotels | on by default (`SHOP_SIMULATED_SUPPLIERS`) |
-| Booking.com Demand, Expedia Rapid | Bookable | require partner approval (not implemented) |
+| **trivago** (official MCP server `mcp.trivago.com`): live prices aggregated from Booking.com, Expedia, Hotels.com, Trip.com, hotel websites… | Compare-only: cheapest current deal per hotel and its site; the guest books via the trivago link | **On by default, no key** (`SHOP_TRIVAGO`, market `SHOP_MARKET`) |
+| "Also check" links on every real hotel | Opens Booking.com, Expedia and Google Hotels searches for the same hotel and dates (their live prices) | Always (plain search URLs, no data fetched) |
+| LiteAPI (2M+ hotels) | Bookable in-app; sandbox books without charging | `LITEAPI_KEY` (free sandbox key) |
+| Google Hotels via SerpApi | Compare-only, several sites per hotel | `SERPAPI_KEY` (free tier ~250 searches/month) |
+| Booking.com Demand, Expedia Rapid | Bookable | Require partner approval (not implemented) |
+| SimStay, DemoTrip, MockBooker, PriceWatch | Simulated, fictional hotels | Off by default; tests only (`SHOP_SIMULATED_SUPPLIERS`) |
+
+trivago's responses include presentation rules for AI assistants: each accommodation as its own card with price per stay and per night, stars, guest rating with review count, amenities, and a "View on trivago" link, not a comparison grid. The /shop page follows them and credits "Powered by trivago". Only the JSON data is parsed; the response's free text never reaches our model. A live search takes about 6–7 s and returns about 25 hotels.
 
 We never scrape OTA websites; their terms forbid it. Amadeus Self-Service was shut down in July 2026.
 
