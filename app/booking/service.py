@@ -207,6 +207,7 @@ def offer_view(o: Offer) -> dict:
     return {
         "offer_id": o.offer_id,
         "room_name": o.room_name,
+        "room_size": o.room_size,
         "rate_plan": o.rate_plan,
         "max_occupancy": o.max_occupancy,
         "meal_plan": o.meal_plan,

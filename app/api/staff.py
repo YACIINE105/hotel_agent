@@ -1,6 +1,8 @@
 """Staff API: inbox, takeover, knowledge, bookings. Every query is scoped to the caller's organization."""
 
-from fastapi import APIRouter
+import time
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -16,6 +18,10 @@ router = APIRouter(prefix="/v1/staff", tags=["staff"])
 
 class ReplyInput(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+
+class TypingInput(BaseModel):
+    typing: bool
 
 
 class TakeoverInput(BaseModel):
@@ -92,13 +98,27 @@ async def conversation(conversation_id: str, org: StaffDep, session: SessionDep)
 
 
 @router.post("/conversations/{conversation_id}/reply", status_code=201)
-async def reply(conversation_id: str, data: ReplyInput, org: StaffDep, session: SessionDep):
+async def reply(conversation_id: str, data: ReplyInput, request: Request, org: StaffDep, session: SessionDep):
     conv = await _conversation(session, org, conversation_id)
+    request.app.state.typing.pop(conv.id, None)
     conv.ai_paused, conv.status = True, "HANDOFF"  # a human reply takes over the conversation
     message = Message(conversation_id=conv.id, property_id=conv.property_id, sender="staff", content=data.text)
     session.add(message)
     await session.commit()
     return {"id": message.id}
+
+
+@router.post("/conversations/{conversation_id}/typing", status_code=204)
+async def typing(conversation_id: str, data: TypingInput, request: Request, org: StaffDep, session: SessionDep):
+    """Staff typing indicator. The inbox sends this every ~2 s while typing; it expires after 5 s.
+
+    Kept in process memory; with several API instances this belongs in Postgres or Redis.
+    """
+    conv = await _conversation(session, org, conversation_id)
+    if data.typing:
+        request.app.state.typing[conv.id] = time.monotonic() + 5
+    else:
+        request.app.state.typing.pop(conv.id, None)
 
 
 @router.post("/conversations/{conversation_id}/takeover")

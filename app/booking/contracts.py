@@ -85,6 +85,7 @@ class Offer(Strict):
     offer_id: str
     room_type: str
     room_name: str
+    room_size: str = ""
     rate_plan: str
     query: AvailabilityQuery
     max_occupancy: int

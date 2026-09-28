@@ -46,6 +46,7 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
 
     app = FastAPI(title="Hotel Agent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.typing = {}  # conversation_id -> monotonic expiry of the staff typing indicator
     app.add_exception_handler(AppError, handle_app_error)
     # The widget is embedded on hotel websites; guest endpoints use bearer tokens, not cookies.
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],

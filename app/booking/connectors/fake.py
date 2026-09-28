@@ -68,6 +68,23 @@ class FakeReservationConnector:
             property_id, _Inventory(rooms=options.get("rooms", DEFAULT_ROOMS))
         )
         self.city_tax = Decimal(str(options.get("city_tax_per_adult_night", CITY_TAX_PER_ADULT_NIGHT)))
+        # Optional children policy, e.g. free under 6, a nightly fee until 12, adults from 12.
+        self.child_free_under = options.get("child_free_under")
+        self.child_adult_from = options.get("child_adult_from", 18)
+        self.child_fee = Decimal(str(options.get("child_fee_per_night", "0")))
+
+    def _adults(self, q: AvailabilityQuery) -> int:
+        return q.adults + sum(1 for a in q.children_ages if a >= self.child_adult_from)
+
+    def _child_fees(self, q: AvailabilityQuery) -> Decimal:
+        if self.child_free_under is None:
+            return Decimal(0)
+        paying = sum(1 for a in q.children_ages if self.child_free_under <= a < self.child_adult_from)
+        return (self.child_fee * paying * q.nights).quantize(CENT)
+
+    def _fits(self, room: dict, q: AvailabilityQuery) -> bool:
+        guests = q.adults + len(q.children_ages)
+        return room["max"] >= guests and room.get("max_adults", room["max"]) >= self._adults(q)
 
     def _fault(self, name: str) -> bool:
         if name in self.store.faults:
@@ -85,7 +102,7 @@ class FakeReservationConnector:
         nightly = Decimal(room["rate"]) + self.store.rate_bump
         if plan == "NR":
             nightly = (nightly * Decimal("0.90")).quantize(CENT)
-        total = (nightly * q.nights).quantize(CENT)
+        total = (nightly * q.nights).quantize(CENT) + self._child_fees(q)
         taxes = (total - total / (1 + VAT_RATE)).quantize(CENT)
         city_tax = (self.city_tax * q.adults * q.nights).quantize(CENT)
         if plan == "FLEX":
@@ -107,6 +124,7 @@ class FakeReservationConnector:
             offer_id=f"{room['code']}:{plan}:{q.check_in}:{q.check_out}:{q.adults}:{ages}",
             room_type=room["code"],
             room_name=room["name"],
+            room_size=room.get("size", ""),
             rate_plan="Flexible" if plan == "FLEX" else "Non-refundable",
             query=q,
             max_occupancy=room["max"],
@@ -123,10 +141,9 @@ class FakeReservationConnector:
     async def search(self, query: AvailabilityQuery) -> list[Offer]:
         if self._fault("sold_out"):
             return []
-        guests = query.adults + len(query.children_ages)
         offers = []
         for room in self.store.rooms:
-            if room["max"] >= guests and self._free(room, query) > 0:
+            if self._fits(room, query) and self._free(room, query) > 0:
                 offers += [self._offer(room, "FLEX", query), self._offer(room, "NR", query)]
         return offers
 
@@ -152,7 +169,7 @@ class FakeReservationConnector:
         room = next((r for r in self.store.rooms if r["code"] == code), None)
         if room is None or plan not in ("FLEX", "NR") or self._free(room, q) <= 0:
             return None
-        if room["max"] < q.adults + len(q.children_ages):
+        if not self._fits(room, q):
             return None
         if self._fault("price_change"):
             self.store.rate_bump += Decimal("10.00")

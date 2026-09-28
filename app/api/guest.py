@@ -1,6 +1,8 @@
 """Guest-facing API used by the embeddable widget and any custom front end."""
 
 import json
+import time
+from datetime import date
 from typing import Annotated
 from uuid import uuid4
 
@@ -9,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.agent.forms import run_form_step
 from app.agent.orchestrator import TurnRunner
 from app.api.deps import ProvidersDep, SessionDep, SettingsDep, bearer, guest_context, property_by_slug
 from app.booking.registry import connector_for
@@ -39,6 +42,26 @@ class MessageInput(BaseModel):
 
 class ConfirmInput(BaseModel):
     quote_id: str = Field(min_length=8, max_length=36)
+
+
+class AvailabilityInput(BaseModel):
+    check_in: date
+    check_out: date
+    adults: int = Field(ge=1, le=10)
+    children_ages: list[int] = Field(default_factory=list, max_length=6)
+
+
+class QuoteInput(BaseModel):
+    offer_id: str = Field(min_length=3, max_length=120)
+    first_name: str = Field(min_length=1, max_length=80)
+    last_name: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=254)
+    phone: str | None = Field(default=None, max_length=40)
+    special_requests: str | None = Field(default=None, max_length=500)
+
+
+def staff_typing(request: Request, conversation_id: str) -> bool:
+    return request.app.state.typing.get(conversation_id, 0) > time.monotonic()
 
 
 @router.get("/properties/{slug}/widget-config")
@@ -86,7 +109,7 @@ async def send_message(conversation_id: str, data: MessageInput, request: Reques
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def list_messages(conversation_id: str, session: SessionDep, settings: SettingsDep,
+async def list_messages(conversation_id: str, request: Request, session: SessionDep, settings: SettingsDep,
                         after: int = 0, authorization: Auth = None):
     _, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
     rows = (
@@ -97,6 +120,7 @@ async def list_messages(conversation_id: str, session: SessionDep, settings: Set
     return {
         "status": conv.status,
         "ai_paused": conv.ai_paused,
+        "staff_typing": staff_typing(request, conv.id),
         "messages": [{"id": m.id, "sender": m.sender, "content": m.content, "created_at": m.created_at.isoformat()}
                      for m in rows],
     }
@@ -118,3 +142,25 @@ async def confirm_booking(conversation_id: str, data: ConfirmInput, session: Ses
                         meta={"booking": {k: v for k, v in result.items() if k != "new_quote"}}))
     await session.commit()
     return result
+
+
+@router.post("/conversations/{conversation_id}/availability")
+async def search_availability(conversation_id: str, data: AvailabilityInput, session: SessionDep,
+                              settings: SettingsDep, authorization: Auth = None):
+    """Booking form step 1: dates and guests -> live offers, without a model call."""
+    prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
+    ages = ", ".join(str(a) for a in data.children_ages)
+    text = f"{data.check_in} → {data.check_out} · {data.adults} adult(s)" + (f" · children aged {ages}" if ages else "")
+    outcome, reply = await run_form_step(session, prop, conv, "search_availability", data.model_dump(mode="json"), text)
+    return {"reply": reply, "offers": outcome.result.get("offers", [])}
+
+
+@router.post("/conversations/{conversation_id}/quotes")
+async def create_quote(conversation_id: str, data: QuoteInput, session: SessionDep, settings: SettingsDep,
+                       authorization: Auth = None):
+    """Booking form step 2: chosen offer + guest details -> booking summary to confirm."""
+    prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
+    text = f"{data.first_name} {data.last_name} · {data.email}"
+    outcome, reply = await run_form_step(session, prop, conv, "prepare_booking",
+                                         data.model_dump(exclude_none=True), text)
+    return {"reply": reply, "quote": outcome.result["quote"]}

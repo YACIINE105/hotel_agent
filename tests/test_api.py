@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.booking.connectors.fake import reset_fake_store
 from app.config import Settings
 from app.main import create_app
-from app.seed import DEMO_KEYS
+from tests.seed_data import DEMO_KEYS, seed_test_hotels
 
 CHECK_IN = (date.today() + timedelta(days=14)).isoformat()
 CHECK_OUT = (date.today() + timedelta(days=16)).isoformat()
@@ -35,8 +35,13 @@ def call(name, **args):
 @pytest.fixture
 def client(tmp_path):
     settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/api.db",
-                        llm_api_key="test", llm_model="fake-model", session_secret="test-secret")
+                        llm_api_key="test", llm_model="fake-model", session_secret="test-secret", seed_demo=False)
     with TestClient(create_app(settings)) as c:
+        async def seed():
+            async with c.app.state.sessionmaker() as session:
+                await seed_test_hotels(session)
+
+        c.portal.call(seed)
         yield c
     reset_fake_store()
 
@@ -364,3 +369,78 @@ def test_empty_answer_gets_one_retry_then_text(client):
     assert "".join(e["text"] for e in events if e["type"] == "delta") == "Yes, there is a pool."
     assert llm.requests[1]["tools"] is None
     assert llm.requests[1]["messages"][-1]["role"] == "user"  # Qwen rejects late system messages
+
+
+
+# --- booking forms, typing indicator ------------------------------------------
+
+def test_booking_forms_search_quote_confirm_without_model(client):
+    llm = script(client, [])
+    conv, h = start(client)
+    r = client.post(f"/v1/conversations/{conv}/availability", headers=h,
+                    json={"check_in": CHECK_IN, "check_out": CHECK_OUT, "adults": 2, "children_ages": []})
+    assert r.status_code == 200, r.text
+    offer = next(o for o in r.json()["offers"] if o["offer_id"].startswith("STD:FLEX"))
+    q = client.post(f"/v1/conversations/{conv}/quotes", headers=h, json={
+        "offer_id": offer["offer_id"], "first_name": "Amina", "last_name": "Haddad", "email": "amina@example.com"})
+    assert q.status_code == 200, q.text
+    booked = client.post(f"/v1/conversations/{conv}/bookings/confirm", headers=h,
+                         json={"quote_id": q.json()["quote"]["quote_id"]})
+    assert booked.json()["state"] == "CONFIRMED" and llm.requests == []
+    # The model sees the form steps as real tool calls in later turns.
+    llm = script(client, [[("text", "You're all set.")]])
+    send(client, conv, h, "Thanks")
+    replay = llm.requests[0]["messages"]
+    assert any(m.get("tool_calls") and m["tool_calls"][0]["function"]["name"] == "prepare_booking" for m in replay)
+
+
+def test_quote_form_rejects_offer_not_shown_in_conversation(client):
+    conv, h = start(client)
+    r = client.post(f"/v1/conversations/{conv}/quotes", headers=h, json={
+        "offer_id": f"STD:FLEX:{CHECK_IN}:{CHECK_OUT}:2:none", "first_name": "A", "last_name": "B",
+        "email": "a@example.com"})
+    assert r.status_code == 422
+
+
+def test_availability_form_validates_dates(client):
+    conv, h = start(client)
+    r = client.post(f"/v1/conversations/{conv}/availability", headers=h,
+                    json={"check_in": CHECK_OUT, "check_out": CHECK_IN, "adults": 2})
+    assert r.status_code == 422
+
+
+def test_booking_intent_without_dates_offers_form(client):
+    script(client, [[("text", "Sure, which dates?")]])
+    conv, h = start(client)
+    events = send(client, conv, h, "I want to book a room")
+    assert any(e["type"] == "booking_form" for e in events)
+    script(client, [[("text", "Parking is free.")]])
+    assert not any(e["type"] == "booking_form" for e in send(client, conv, h, "Is parking free?"))
+
+
+def test_staff_typing_indicator_expires_and_clears_on_reply(client, monkeypatch):
+    import time as _time
+
+    conv, h = start(client)
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+    assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
+    assert client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=staff).status_code == 204
+    assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is True
+    client.post(f"/v1/staff/conversations/{conv}/reply", json={"text": "Hello!"}, headers=staff)
+    assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
+    client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=staff)
+    real = _time.monotonic
+    monkeypatch.setattr("app.api.guest.time.monotonic", lambda: real() + 6)
+    assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
+    oran = {"X-API-Key": DEMO_KEYS["oran"]}
+    assert client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=oran).status_code == 404
+
+
+def test_default_seed_is_the_hurghada_hotel(tmp_path):
+    settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/seed.db", session_secret="x")
+    with TestClient(create_app(settings)) as c:
+        cfg = c.get("/v1/properties/steigenberger-aldau/widget-config").json()
+        assert cfg["name"] == "Steigenberger ALDAU Beach Hotel" and cfg["currency"] == "USD"
+        assert c.get("/v1/properties/atlas-bay/widget-config").status_code == 404
+        facts = c.get("/v1/staff/properties/steigenberger-aldau/facts", headers={"X-API-Key": "demo-aldau-staff-key"}).json()
+        assert {f["language"] for f in facts} == {"en", "ar"}

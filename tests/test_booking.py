@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
@@ -174,3 +175,25 @@ async def test_money_is_decimal_and_terms_hash_covers_price(ctx, session):
     stored = await session.get(QuoteRecord, record.id)
     assert stored.data["offer"]["total"] == "190.00"
     assert stored.data["offer"]["pay_at_property_fees"] == "10.00"
+
+
+async def test_children_policy_fees_and_adult_age():
+    from app.booking.connectors.fake import FakeReservationConnector
+    from app.seed import CHILD_POLICY, ROOMS
+
+    fake = FakeReservationConnector(999, "Africa/Cairo", "USD", {"rooms": ROOMS, "city_tax_per_adult_night": "0",
+                                                                **CHILD_POLICY})
+    start = date.today() + timedelta(days=10)
+
+    def q(adults, ages):
+        return AvailabilityQuery(check_in=start, check_out=start + timedelta(days=2), adults=adults, children_ages=ages)
+
+    base = {o.offer_id.split(":")[0]: o for o in await fake.search(q(2, [])) if ":FLEX:" in o.offer_id}
+    kids = {o.offer_id.split(":")[0]: o for o in await fake.search(q(2, [4, 8])) if ":FLEX:" in o.offer_id}
+    # Only the Family Suite fits 2+2; the 8-year-old costs 32 USD x 2 nights, the 4-year-old is free.
+    assert set(kids) == {"FAM"}
+    assert kids["FAM"].total - base["FAM"].total == Decimal("64.00")
+    # A 13-year-old counts as an adult: 2 adults + 13y = 3 adults -> Sea View (max 2 adults) is excluded.
+    teen = {o.offer_id.split(":")[0] for o in await fake.search(q(2, [13]))}
+    assert teen == {"SUP-GP", "FAM"}
+

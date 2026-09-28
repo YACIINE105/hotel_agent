@@ -263,6 +263,13 @@ class TurnRunner:
             answer = answer or fallback
             meta["error"] = "provider_unavailable" + (f" (HTTP {exc.upstream_status})" if exc.upstream_status else "")
 
+        # Booking intent but no search yet: offer the structured form instead of a text interview.
+        called = {t["name"] for t in tool_log}
+        if tools and BOOKING_INTENT.search(text) and not called & {"search_availability", "prepare_booking"} \
+                and any(t["function"]["name"] == "search_availability" for t in tools):
+            yield {"type": "booking_form"}
+            meta["booking_form"] = True
+
         known = {f["id"] for f in facts} | {d["id"] for d in documents}
         used = citations(answer)
         meta["sources"] = sorted(used & known)
