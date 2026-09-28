@@ -111,7 +111,7 @@ async def send_message(conversation_id: str, data: MessageInput, request: Reques
     async def events():
         async with request.app.state.sessionmaker() as session:
             prop, conv = await guest_context(session, settings, conversation_id, bearer(authorization))
-            runner = TurnRunner(session, providers, settings, prop, conv)
+            runner = TurnRunner(session, providers, settings, prop, conv, request.app.state.shop_suppliers)
             async for event in runner.run(data.text, data.request_id, data.language):
                 yield sse(event)
 

@@ -808,3 +808,72 @@ def test_area_documents_are_retrieved_with_their_source(client):
     conv, h = start(client)
     send(client, conv, h, "How long is the boat to Giftun Island?")
     assert "(Area guide · Giftun (test)) Giftun Island is a protected area" in llm.requests[0]["messages"][0]["content"]
+
+
+# --- travel shopper (second business model) ------------------------------------
+
+def _travel(client):
+    from app.seed import ensure_travel_shopper
+
+    async def run():
+        async with client.app.state.sessionmaker() as session:
+            await ensure_travel_shopper(session)
+
+    client.portal.call(run)
+    return start(client, slug="travel")
+
+
+SHOP_DATES = {"check_in": (date.today() + timedelta(days=45)).isoformat(),
+              "check_out": (date.today() + timedelta(days=48)).isoformat()}
+
+
+def test_shopper_forms_search_best_of_and_confirm(client):
+    conv, h = _travel(client)
+    r = client.post(f"/v1/conversations/{conv}/shop/search", headers=h,
+                    json={"city": "Hurghada", "country_code": "EG", "adults": 2, **SHOP_DATES})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["hotels"] and "cheapest total" in data["reply"]
+    assert {s["status"] for s in data["suppliers"]} == {"ok"}
+    picks = [o["offer_id"] for hotel in data["hotels"][:3] for o in hotel["offers"] if o["kind"] == "bookable"][:3]
+    q = client.post(f"/v1/conversations/{conv}/shop/quote", headers=h, json={
+        "offer_ids": picks, "first_name": "Amina", "last_name": "Haddad", "email": "amina@example.com"})
+    assert q.status_code == 200, q.text
+    quote = q.json()["quote"]
+    assert len(quote["compared"]) == 3 and quote["simulated"] is True
+    c1 = client.post(f"/v1/conversations/{conv}/shop/confirm", headers=h, json={"quote_id": quote["quote_id"]}).json()
+    c2 = client.post(f"/v1/conversations/{conv}/shop/confirm", headers=h, json={"quote_id": quote["quote_id"]}).json()
+    assert c1["state"] == "CONFIRMED" and c1["reference"] == c2["reference"]
+
+
+def test_shopper_agent_uses_its_own_tools_and_prompt(client):
+    conv, h = _travel(client)
+    llm = script(client, [
+        [call("search_stays", city="Hurghada", country_code="EG", adults=2, **SHOP_DATES)],
+        [("text", "The cheapest option is shown first.")],
+    ])
+    events = send(client, conv, h, "Find me the cheapest hotel in Hurghada for 3 nights")
+    system = llm.requests[0]["messages"][0]["content"]
+    assert "travel shopping assistant" in system and "Answerly Travel" in system
+    names = {t["function"]["name"] for t in llm.requests[0]["tools"]}
+    assert names == {"search_stays", "compare_prices", "prepare_booking"}  # no confirm tool, no hotel tools
+    hotels = next(e for e in events if e["type"] == "hotels")["search"]["hotels"]
+    offer = next(o["offer_id"] for o in hotels[0]["offers"] if o["kind"] == "bookable")
+    script(client, [[call("prepare_booking", offer_ids=[offer], first_name="Amina", last_name="Haddad",
+                          email="amina@example.com")]])
+    events = send(client, conv, h, "Book it for Amina Haddad, amina@example.com")
+    assert any(e["type"] == "shop_quote" for e in events)
+    assert "re-checked" in "".join(e["text"] for e in events if e["type"] == "delta")
+
+
+def test_shopper_offers_search_form_on_intent(client):
+    conv, h = _travel(client)
+    script(client, [[("text", "Which city and dates?")]])
+    assert any(e["type"] == "search_form" for e in send(client, conv, h, "I need a cheap hotel"))
+
+
+def test_shop_endpoints_refuse_hotel_conversations(client):
+    conv, h = start(client)  # the hotel's own front desk
+    r = client.post(f"/v1/conversations/{conv}/shop/search", headers=h,
+                    json={"city": "Hurghada", "country_code": "EG", "adults": 2, **SHOP_DATES})
+    assert r.status_code == 400

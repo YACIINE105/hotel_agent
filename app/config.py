@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     tts_languages: str = "en"
     tts_prefetch: int = 2
 
+    # Travel shopper suppliers. Real ones switch on when their key is set.
+    liteapi_key: str = ""            # https://dashboard.liteapi.travel (free sandbox key)
+    liteapi_sandbox: bool = True     # live booking needs a payment integration first
+    liteapi_nationality: str = "US"  # guestNationality sent with searches
+    serpapi_key: str = ""            # Google Hotels prices across Booking.com, Expedia, ...
+    shop_simulated_suppliers: bool = True
+    shop_supplier_timeout: float = 12
+
     @property
     def llm_configured(self) -> bool:
         return bool(self.llm_api_key and self.llm_model)

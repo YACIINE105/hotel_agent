@@ -10,12 +10,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api import guest, staff, voice
+from app.api import guest, shop, staff, voice
 from app.booking.connectors.fake import use_database
 from app.config import Settings, get_settings
 from app.db import Base, make_engine, make_sessionmaker
 from app.errors import AppError, handle_app_error
 from app.providers import Providers
+from app.shopper.registry import build_suppliers
 from app.ratelimit import make_limiter
 from app.realtime import make_broker
 from app.seed import seed
@@ -61,6 +62,7 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=120),
         )
         app.state.providers = Providers(settings, http)
+        app.state.shop_suppliers = build_suppliers(settings, http)
         app.state.loop = asyncio.get_running_loop()
         app.state.broker = make_broker(settings.database_url)
         await app.state.broker.start()
@@ -79,6 +81,7 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
     app.include_router(guest.router)
     app.include_router(voice.router)
     app.include_router(staff.router)
+    app.include_router(shop.router)
 
     @app.get("/health")
     async def health():

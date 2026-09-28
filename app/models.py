@@ -202,3 +202,47 @@ class RateLimitCounter(Base):
     key: Mapped[str] = mapped_column(String(200), primary_key=True)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ShopSearch(Base):
+    """A travel-shopper search: merged results across suppliers, referenced by offer ids later."""
+
+    __tablename__ = "shop_searches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    query: Mapped[dict] = mapped_column(JSON)
+    results: Mapped[list] = mapped_column(JSON)       # hotels with offers (each offer has an offer_id)
+    suppliers: Mapped[list] = mapped_column(JSON)     # per-supplier status: ok/error/timeout, count, ms
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ShopQuote(Base):
+    __tablename__ = "shop_quotes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    search_id: Mapped[str] = mapped_column(ForeignKey("shop_searches.id"))
+    offer: Mapped[dict] = mapped_column(JSON)          # the chosen offer (as searched)
+    recheck: Mapped[dict] = mapped_column(JSON)        # fresh price + supplier_ref (e.g. prebookId)
+    terms: Mapped[dict] = mapped_column(JSON)          # what the guest confirms
+    terms_hash: Mapped[str] = mapped_column(String(64))
+    compared: Mapped[list] = mapped_column(JSON, default=list)  # re-check results of all candidate offers
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class ShopBooking(Base):
+    __tablename__ = "shop_bookings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    quote_id: Mapped[str] = mapped_column(ForeignKey("shop_quotes.id"), unique=True)  # one booking per quote
+    state: Mapped[str] = mapped_column(String(20))    # SUBMITTING | CONFIRMED | FAILED | UNKNOWN
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    supplier: Mapped[str] = mapped_column(String(40))
+    supplier_reference: Mapped[str | None] = mapped_column(String(120))
+    hotel_confirmation: Mapped[str | None] = mapped_column(String(120))
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

@@ -51,7 +51,7 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
         try:
             async with app.state.sessionmaker() as session:
                 prop, conv = await guest_context(session, settings, conversation_id, token)
-                runner = TurnRunner(session, providers, settings, prop, conv)
+                runner = TurnRunner(session, providers, settings, prop, conv, app.state.shop_suppliers)
                 async for event in runner.run(text, str(uuid4())):
                     await send(event)
                     # run() sets conv.language (detected or chosen) before its first event.

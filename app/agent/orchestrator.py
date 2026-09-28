@@ -28,12 +28,14 @@ from app.agent.sentences import (
 )
 from app.agent.tools import BOOKING_INTENT, EXPLICIT_HUMAN, HUMAN_INTENT, ToolExecutor, tool_definitions
 from app.booking.registry import connector_for
+from app.shopper.service import ShopService
+from app.shopper.tools import SHOP_INTENT, SHOPPER_RULES, ShopToolExecutor, shop_tool_definitions
 from app.booking.service import BookingService
 from app.config import Settings
 from app.errors import Unavailable
 from app.knowledge.fallback import match_facts, small_talk, unsupported_free_claim
 from app.knowledge.service import KnowledgeService
-from app.models import Conversation, Message, Property, Turn
+from app.models import Conversation, Handoff, Message, Property, Turn
 from app.providers import Providers
 
 HISTORY_LIMIT = 16
@@ -93,9 +95,12 @@ def _history_lines(m: Message) -> list[dict]:
 
 class TurnRunner:
     def __init__(self, session: AsyncSession, providers: Providers, settings: Settings,
-                 prop: Property, conversation: Conversation):
+                 prop: Property, conversation: Conversation, suppliers: list | None = None):
         self.session, self.providers, self.settings = session, providers, settings
         self.prop, self.conv = prop, conversation
+        # Business model: a hotel's own front desk, or the multi-site travel shopper.
+        self.shopper = (prop.connector or {}).get("type") == "shopper"
+        self.suppliers = suppliers or []
 
     async def _history(self) -> list[Message]:
         rows = (
@@ -117,10 +122,11 @@ class TurnRunner:
         yield {"type": "done", "message_id": turn.message_id, "replayed": True}
 
     async def _handoff_now(self, text: str, request_id: str, digest: str, guest_lang: str) -> AsyncIterator[dict]:
-        executor = ToolExecutor(BookingService(self.session, self.prop, connector_for(self.prop)), self.conv)
-        outcome = await executor.run("handoff_to_staff", json.dumps({"reason": f"Guest asked for staff: {text[:200]}"}))
-        for event in outcome.events:
-            yield event
+        self.session.add(Handoff(conversation_id=self.conv.id, property_id=self.prop.id,
+                                 reason=f"Guest asked for staff: {text[:200]}"))
+        self.conv.status, self.conv.ai_paused = "HANDOFF", True
+        await self.session.commit()
+        yield {"type": "handoff"}
         answer = lang.localized(lang.HANDED_OFF, guest_lang)
         yield {"type": "delta", "text": answer}
         for sentence in SentenceChunker().feed(answer + " "):
@@ -183,23 +189,33 @@ class TurnRunner:
 
         tz = ZoneInfo(self.prop.timezone)
         today = datetime.now(tz)
-        system = RULES.format(
-            hotel=self.prop.name, tz=self.prop.timezone, weekday=today.strftime("%A"),
-            today=today.date().isoformat(), language=lang.NAMES.get(guest_lang, "English"),
-            facts=_knowledge_lines(facts), documents=_knowledge_lines(documents),
-        )
+        if self.shopper:
+            system = SHOPPER_RULES.format(
+                brand=self.prop.name, weekday=today.strftime("%A"), today=today.date().isoformat(),
+                language=lang.NAMES.get(guest_lang, "English"), facts=_knowledge_lines(facts))
+        else:
+            system = RULES.format(
+                hotel=self.prop.name, tz=self.prop.timezone, weekday=today.strftime("%A"),
+                today=today.date().isoformat(), language=lang.NAMES.get(guest_lang, "English"),
+                facts=_knowledge_lines(facts), documents=_knowledge_lines(documents),
+            )
         messages = [{"role": "system", "content": system}] + [line for m in history for line in _history_lines(m)]
 
-        connector = connector_for(self.prop)
-        executor = ToolExecutor(BookingService(self.session, self.prop, connector), self.conv)
-        for m in history:
-            executor.offers |= {o["offer_id"] for o in (m.meta or {}).get("offers", [])}
-        # Booking context: this conversation already has booking activity (offers, quotes, bookings).
-        booking_context = any(
-            (m.meta or {}).keys() & {"offers", "quote_id", "booking"} or BOOKING_INTENT.search(m.content)
-            for m in history[-6:-1] if m.sender in ("guest", "ai", "system")
-        )
-        tools = tool_definitions(connector.capabilities, text, booking_context) or None
+        if self.shopper:
+            executor = ShopToolExecutor(ShopService(self.session, self.prop, self.suppliers,
+                                                    self.settings.shop_supplier_timeout), self.conv)
+            tools = shop_tool_definitions(text) or None
+        else:
+            connector = connector_for(self.prop)
+            executor = ToolExecutor(BookingService(self.session, self.prop, connector), self.conv)
+            for m in history:
+                executor.offers |= {o["offer_id"] for o in (m.meta or {}).get("offers", [])}
+            # Booking context: this conversation already has booking activity (offers, quotes, bookings).
+            booking_context = any(
+                (m.meta or {}).keys() & {"offers", "quote_id", "booking"} or BOOKING_INTENT.search(m.content)
+                for m in history[-6:-1] if m.sender in ("guest", "ai", "system")
+            )
+            tools = tool_definitions(connector.capabilities, text, booking_context) or None
 
         answer, tool_log, meta = "", [], {}
         cite_filter, md_filter, chunker = CitationFilter(), MarkdownFilter(), SentenceChunker()
@@ -270,6 +286,10 @@ class TurnRunner:
                     for event in outcome.events:
                         if event["type"] == "offers":
                             meta["offers"] = event["offers"]
+                        elif event["type"] == "hotels":
+                            meta["shop_search_id"] = event["search"]["search_id"]
+                        elif event["type"] == "shop_quote":
+                            meta["shop_quote_id"] = event["quote"]["quote_id"]
                         elif event["type"] == "quote":
                             meta["quote_id"] = event["quote"]["quote_id"]
                         yield event
@@ -353,7 +373,11 @@ class TurnRunner:
 
         # Booking intent but no search yet: offer the structured form instead of a text interview.
         called = {t["name"] for t in tool_log}
-        if tools and BOOKING_INTENT.search(text) and not called & {"search_availability", "prepare_booking"} \
+        if self.shopper:
+            if SHOP_INTENT.search(text) and not called & {"search_stays", "prepare_booking", "compare_prices"}:
+                yield {"type": "search_form"}  # dates/guests/city form instead of a text interview
+                meta["search_form"] = True
+        elif tools and BOOKING_INTENT.search(text) and not called & {"search_availability", "prepare_booking"} \
                 and any(t["function"]["name"] == "search_availability" for t in tools):
             yield {"type": "booking_form"}
             meta["booking_form"] = True

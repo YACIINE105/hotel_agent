@@ -134,12 +134,60 @@ async def ensure_area_guide(session: AsyncSession, prop: Property) -> int:
     return total
 
 
+TRAVEL_KEY = "demo-travel-staff-key"
+TRAVEL_SLUG = "travel"
+TRAVEL_FACTS = {
+    "how_it_works": {
+        "en": "We search several booking sites at once and rank hotels by the lowest total price for your dates.",
+        "ar": "نبحث في عدة مواقع حجز في وقت واحد ونرتب الفنادق حسب أقل سعر إجمالي لتواريخك.",
+    },
+    "booking": {
+        "en": "Bookable offers are reserved through a partner booking API after the price is re-checked. Compare-only "
+              "offers open the provider's website, where you complete the booking.",
+        "ar": "العروض القابلة للحجز تُحجز عبر واجهة شريك بعد إعادة التحقق من السعر. عروض المقارنة فقط تفتح موقع المزود "
+              "لإكمال الحجز هناك.",
+    },
+    "best_of": {
+        "en": "You can choose several offers and ask us to book the cheapest one: we re-check them all and keep the "
+              "cheapest that is still available.",
+        "ar": "يمكنك اختيار عدة عروض وطلب حجز الأرخص: نعيد التحقق منها جميعاً ونختار الأرخص المتاح.",
+    },
+    "demo": {
+        "en": "This is a demo. SimStay, DemoTrip, MockBooker and PriceWatch are simulated sites, and their hotels are "
+              "fictional; no real booking or payment happens.",
+        "ar": "هذه نسخة تجريبية. مواقع SimStay وDemoTrip وMockBooker وPriceWatch محاكاة وفنادقها خيالية، ولا يتم أي حجز أو "
+              "دفع حقيقي.",
+    },
+    "support": {
+        "en": "Our travel team can take over any conversation; just ask to talk to a person.",
+        "ar": "يمكن لفريق السفر لدينا تولي أي محادثة؛ فقط اطلب التحدث مع موظف.",
+    },
+}
+
+
+async def ensure_travel_shopper(session: AsyncSession) -> None:
+    """Second business model: a travel agency whose agent shops many sites for the lowest price."""
+    if await session.scalar(select(Property).where(Property.slug == TRAVEL_SLUG)):
+        return
+    org = Organization(name="Answerly Travel (demo)", api_key_hash=hash_api_key(TRAVEL_KEY))
+    session.add(org)
+    await session.flush()
+    prop = Property(org_id=org.id, slug=TRAVEL_SLUG, name="Answerly Travel", timezone="Africa/Cairo",
+                    currency="USD", languages=["en", "ar"], connector={"type": "shopper"})
+    session.add(prop)
+    await session.flush()
+    knowledge = KnowledgeService(session, None, prop.id)
+    for key, by_lang in TRAVEL_FACTS.items():
+        for language, content in by_lang.items():
+            await knowledge.upsert_fact(key, language, content)
+    await session.commit()
+
+
 async def seed(session: AsyncSession) -> None:
+    await ensure_travel_shopper(session)
     existing = await session.scalar(select(Property).where(Property.slug == SLUG))
     if existing:
         await ensure_area_guide(session, existing)
-        return
-    if await session.scalar(select(Property).limit(1)):
         return
     org = Organization(name="Steigenberger ALDAU Beach Hotel (demo)", api_key_hash=hash_api_key(DEMO_KEY))
     session.add(org)
