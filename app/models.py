@@ -1,11 +1,12 @@
 """Persistent records. Every business row carries property_id; queries must filter on it."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -166,3 +167,27 @@ class Handoff(Base):
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="OPEN")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SimReservation(Base):
+    """Bookings made in the simulated reservation system (demo connector), shared by all workers."""
+
+    __tablename__ = "sim_reservations"
+    reference: Mapped[str] = mapped_column(String(20), primary_key=True)
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True)
+    room_code: Mapped[str] = mapped_column(String(40))
+    check_in: Mapped[date] = mapped_column(Date)
+    check_out: Mapped[date] = mapped_column(Date)
+    quote: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class SimFlag(Base):
+    """Simulator switches: armed faults and the persistent price bump."""
+
+    __tablename__ = "sim_flags"
+    property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[str] = mapped_column(String(60))

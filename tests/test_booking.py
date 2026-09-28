@@ -197,3 +197,26 @@ async def test_children_policy_fees_and_adult_age():
     teen = {o.offer_id.split(":")[0] for o in await fake.search(q(2, [13]))}
     assert teen == {"SUP-GP", "FAM"}
 
+
+
+async def test_concurrent_bookings_of_the_last_room_sell_it_once(session, hotels, sessionmaker):
+    """The shared (database) simulator store: parallel confirms, as from several workers."""
+    from app.booking.connectors.fake import use_database
+
+    use_database(sessionmaker)
+    prop = hotels[0]
+    convs = [Conversation(property_id=prop.id) for _ in range(5)]
+    session.add_all(convs)
+    await session.commit()
+    quotes = []
+    for conv in convs:
+        async with sessionmaker() as s:
+            svc = BookingService(s, prop, connector_for(prop))
+            quotes.append((conv.id, (await quote_for(svc, conv.id, room="FAM")).id))  # 1 Family Suite exists
+
+    async def confirm(conv_id, quote_id):
+        async with sessionmaker() as s:
+            return await BookingService(s, prop, connector_for(prop)).confirm(conv_id, quote_id)
+
+    results = await asyncio.gather(*(confirm(c, q) for c, q in quotes))
+    assert sorted(r["state"] for r in results).count(BookingState.CONFIRMED) == 1

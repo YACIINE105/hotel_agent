@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
 from app.api.deps import ProvidersDep, SessionDep, SettingsDep, StaffDep, staff_property
-from app.booking.connectors.fake import inject_fault
 from app.booking.registry import connector_for
 from app.errors import AppError, NotFound
 from app.knowledge.service import KnowledgeService
@@ -181,6 +180,5 @@ async def fault(slug: str, data: FaultInput, org: StaffDep, session: SessionDep,
     prop = await staff_property(session, org, slug)
     if settings.environment != "development" or prop.connector.get("type") != "fake":
         raise AppError("Simulator faults are only available for fake connectors in development", status_code=403)
-    connector_for(prop)  # ensure the simulator store exists
-    inject_fault(prop.id, data.fault)
+    await connector_for(prop).store.add_fault(data.fault)
     return {"armed": data.fault}

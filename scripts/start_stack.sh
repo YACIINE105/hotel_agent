@@ -15,8 +15,12 @@ wait_for() {  # name, log file
 if ! nvidia-smi >/dev/null 2>&1; then
   echo "GPU not visible in WSL. From Windows PowerShell run: wsl --shutdown   then reopen the terminal."; exit 1
 fi
+if grep -qE '^DATABASE_URL=postgresql' .env; then
+  echo "Postgres"; uv run python scripts/postgres.py >/dev/null && echo "  Postgres ready"
+  uv run alembic upgrade head >/dev/null 2>&1 && echo "  schema up to date"
+fi
 echo "ASR (Qwen3-ASR, vLLM)";   nohup ./scripts/run_asr.sh > .run/asr.log 2>&1 & wait_for ASR .run/asr.log
 echo "LLM (Qwen3.5-2B, vLLM)";  nohup ./scripts/run_llm.sh > .run/llm.log 2>&1 & wait_for LLM .run/llm.log
 echo "TTS (Kokoro)";            nohup ./scripts/run_tts.sh > .run/tts.log 2>&1 & wait_for TTS .run/tts.log
-echo "API";                     nohup ./scripts/run_api.sh > .run/api.log 2>&1 & wait_for API .run/api.log
+echo "API (workers: ${WORKERS:-2})"; WORKERS="${WORKERS:-2}" nohup ./scripts/run_api.sh > .run/api.log 2>&1 & wait_for API .run/api.log
 echo "Open http://localhost:8000  (staff inbox: /inbox, key demo-aldau-staff-key)"

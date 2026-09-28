@@ -34,8 +34,8 @@ def call(name, **args):
 
 
 @pytest.fixture
-def client(tmp_path):
-    settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/api.db",
+def client(db_url):
+    settings = Settings(_env_file=None, database_url=db_url,
                         llm_api_key="test", llm_model="fake-model", session_secret="test-secret", seed_demo=False)
     with TestClient(create_app(settings)) as c:
         async def seed():
@@ -454,8 +454,8 @@ def test_staff_typing_indicator_expires_and_clears_on_reply(client):
     assert client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=oran).status_code == 404
 
 
-def test_default_seed_is_the_hurghada_hotel(tmp_path):
-    settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/seed.db", session_secret="x")
+def test_default_seed_is_the_hurghada_hotel(db_url):
+    settings = Settings(_env_file=None, database_url=db_url, session_secret="x")
     with TestClient(create_app(settings)) as c:
         cfg = c.get("/v1/properties/steigenberger-aldau/widget-config").json()
         assert cfg["name"] == "Steigenberger ALDAU Beach Hotel" and cfg["currency"] == "USD"
@@ -588,7 +588,7 @@ def test_children_question_does_not_open_booking_form(client):
 # --- live push (SSE) ----------------------------------------------------------
 
 @pytest.fixture
-def live_server(tmp_path):
+def live_server(db_url):
     """A real uvicorn server in a thread: TestClient buffers whole responses, so it can't read SSE."""
     import socket
     import threading
@@ -596,7 +596,7 @@ def live_server(tmp_path):
 
     import uvicorn
 
-    settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/live.db",
+    settings = Settings(_env_file=None, database_url=db_url,
                         llm_api_key="test", llm_model="fake-model", session_secret="test-secret", seed_demo=False)
     app = create_app(settings)
     sock = socket.socket()

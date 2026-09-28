@@ -8,8 +8,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app.api import guest, staff, voice
+from app.booking.connectors.fake import use_database
 from app.config import Settings, get_settings
 from app.db import Base, make_engine, make_sessionmaker
 from app.errors import AppError, handle_app_error
@@ -36,18 +38,27 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = make_engine(settings.database_url)
-        if settings.environment == "development":
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
         app.state.sessionmaker = make_sessionmaker(engine)
+        use_database(app.state.sessionmaker)  # simulator inventory shared by all workers
+        # Several workers start at once: on Postgres, one at a time creates tables and seeds.
+        async with engine.connect() as lock_conn:
+            if engine.dialect.name == "postgresql":
+                await lock_conn.execute(text("SELECT pg_advisory_lock(7424301)"))
+            try:
+                if settings.environment == "development":
+                    async with engine.begin() as conn:
+                        await conn.run_sync(Base.metadata.create_all)
+                if settings.seed_demo:
+                    async with app.state.sessionmaker() as session:
+                        await seed(session)
+            finally:
+                if engine.dialect.name == "postgresql":
+                    await lock_conn.execute(text("SELECT pg_advisory_unlock(7424301)"))
         http = client or httpx.AsyncClient(
             timeout=httpx.Timeout(30, connect=5),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=120),
         )
         app.state.providers = Providers(settings, http)
-        if settings.seed_demo:
-            async with app.state.sessionmaker() as session:
-                await seed(session)
         app.state.loop = asyncio.get_running_loop()
         app.state.broker = make_broker(settings.database_url)
         await app.state.broker.start()
