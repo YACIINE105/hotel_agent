@@ -19,8 +19,13 @@ def make_engine(url: str) -> AsyncEngine:
     if url.startswith("sqlite"):
 
         @event.listens_for(engine.sync_engine, "connect")
-        def _fk(conn, _):
+        def _pragmas(conn, _):
             conn.execute("PRAGMA foreign_keys=ON")
+            # WAL lets reads proceed during a write; without it every write blocked all polling
+            # and turns (load test: ~12 replies/s ceiling). Development/demo only: use Postgres in production.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=5000")
 
     return engine
 

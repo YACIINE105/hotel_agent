@@ -200,6 +200,9 @@ class TurnRunner:
                 round_text, calls = "", []
                 # The last round offers no tools, so a confused model must answer in words.
                 round_tools = tools if round_no < rounds - 1 else None
+                # Release the DB connection while the model streams (seconds): holding it capped
+                # concurrent conversations at the pool size (15) in load tests.
+                await self.session.commit()
                 async for kind, payload in self.providers.stream_chat(messages, round_tools):
                     if kind == "text":
                         mark("first_token_ms")
@@ -266,6 +269,7 @@ class TurnRunner:
                 # A user-role note: several chat templates (Qwen) reject system messages after the first.
                 messages.append({"role": "user", "content": "[Front-desk system note] Reply to the guest's last "
                                  "message now in plain text, using the hotel facts and tool results above."})
+                await self.session.commit()
                 async for kind, payload in self.providers.stream_chat(messages, None):
                     if kind == "text":
                         mark("first_token_ms")
