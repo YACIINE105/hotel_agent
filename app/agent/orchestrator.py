@@ -60,12 +60,13 @@ Booking rules:
 HOTEL FACTS (one per line: [id] text):
 {facts}
 
-RELEVANT DOCUMENTS:
+RELEVANT DOCUMENTS (general area information such as the local guide; not hotel policies or services):
 {documents}"""
 
 
 def _knowledge_lines(items: list[dict]) -> str:
-    return "\n".join(f"[{i['id']}] {i['content']}" for i in items) or "(none)"
+    return "\n".join(f"[{i['id']}]" + (f" ({i['source']})" if i.get("source") else "") + f" {i['content']}"
+                     for i in items) or "(none)"
 
 
 def _history_lines(m: Message) -> list[dict]:
@@ -173,7 +174,7 @@ class TurnRunner:
                 yield event
             return
 
-        knowledge = KnowledgeService(self.session, self.providers, self.prop.id)
+        knowledge = KnowledgeService(self.session, self.providers, self.prop.id, self.prop.knowledge_version)
         # Sequential awaits on one AsyncSession; only the embedding call could overlap.
         history = await self._history()
         facts = await knowledge.facts(guest_lang)

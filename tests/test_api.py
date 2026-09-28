@@ -786,3 +786,25 @@ def test_rate_limits_can_be_disabled(db_url):
 async def _seed_into(app):
     async with app.state.sessionmaker() as session:
         await seed_test_hotels(session)
+
+
+def test_knowledge_cache_is_invalidated_when_a_fact_changes(client):
+    llm = script(client, [[("text", "ok")], [("text", "ok")]])
+    conv, h = start(client)
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+    send(client, conv, h, "When is check-in?")
+    assert "14:00" in llm.requests[0]["messages"][0]["content"]
+    assert client.put("/v1/staff/properties/atlas-bay/facts/check_in", headers=staff,
+                      json={"language": "en", "content": "Check-in is from 13:00."}).status_code == 200
+    send(client, conv, h, "And now?")
+    assert "13:00" in llm.requests[1]["messages"][0]["content"]  # not served from a stale cache
+
+
+def test_area_documents_are_retrieved_with_their_source(client):
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+    client.post("/v1/staff/properties/atlas-bay/documents", headers=staff, json={
+        "source": "Area guide · Giftun (test)", "text": "Giftun Island is a protected area reached by boat in 45 minutes."})
+    llm = script(client, [[("text", "About 45 minutes by boat.")]])
+    conv, h = start(client)
+    send(client, conv, h, "How long is the boat to Giftun Island?")
+    assert "(Area guide · Giftun (test)) Giftun Island is a protected area" in llm.requests[0]["messages"][0]["content"]

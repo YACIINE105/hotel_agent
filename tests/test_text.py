@@ -70,3 +70,24 @@ def test_markdown_is_stripped_across_tokens():
     f = MarkdownFilter()
     tokens = ["I found:\n\n*", "*Sea View", " Room**\n- Total: 37", ",000 DZD\n## Next\n", "check_in stays"]
     assert "".join(f.feed(t) for t in tokens) == "I found:\n\nSea View Room\nTotal: 37,000 DZD\nNext\ncheck_in stays"
+
+
+def test_arabic_normalization_matches_prefixed_and_variant_forms():
+    from app.knowledge.bm25 import BM25Index, tokenize
+
+    assert tokenize("والمطار") == tokenize("المطار") == tokenize("مطار")
+    assert tokenize("مدينة") == tokenize("مدينه")  # taa marbuta
+    assert tokenize("أين متى إلى") == []  # normalized stopwords
+    index = BM25Index([{"id": "a", "content": "يبعد المطار عن المدينة حوالي 4 كم"},
+                       {"id": "b", "content": "الشاطئ رملي والمياه صافية"}])
+    assert index.search("كم يبعد مطار المدينه؟")[0][1]["id"] == "a"
+
+
+def test_bm25_prefers_passages_covering_more_query_terms():
+    from app.knowledge.bm25 import BM25Index
+
+    index = BM25Index([
+        {"id": "list", "content": "Sahl Hasheesh hotels: Sahl Hasheesh Resort, Sahl Hasheesh Palace, Sahl Hasheesh Inn"},
+        {"id": "where", "content": "Sahl Hasheesh is a bay located 18 km south of the airport near Hurghada"},
+    ] + [{"id": f"x{i}", "content": f"unrelated passage number {i} about diving"} for i in range(20)])
+    assert index.search("Where is Sahl Hasheesh located near the airport?")[0][1]["id"] == "where"

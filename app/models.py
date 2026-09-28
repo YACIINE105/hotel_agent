@@ -48,6 +48,8 @@ class Property(Base):
     # {"type": "fake", ...connector options}; credentials are resolved server-side only.
     connector: Mapped[dict] = mapped_column(JSON, default=lambda: {"type": "fake"})
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Bumped on every fact/document change; keys the per-process knowledge cache.
+    knowledge_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

@@ -5,11 +5,14 @@ retrieved 2026-09-28). Availability and prices are SIMULATED by the fake connect
 hotel's systems exists. This is an independent demo, not affiliated with the hotel.
 """
 
+import json
+import pathlib
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.knowledge.service import KnowledgeService
-from app.models import Organization, Property
+from app.models import KnowledgeChunk, Organization, Property
 from app.security import hash_api_key
 
 DEMO_KEY = "demo-aldau-staff-key"
@@ -111,7 +114,31 @@ FACTS = {
 }
 
 
+AREA_GUIDE = pathlib.Path(__file__).resolve().parents[1] / "data" / "area_guide"
+AREA_SOURCE_PREFIX = "Area guide ·"
+
+
+async def ensure_area_guide(session: AsyncSession, prop: Property) -> int:
+    """Load the Hurghada area guide (Wikipedia, CC BY-SA 4.0) as retrievable documents, once."""
+    exists = await session.scalar(select(KnowledgeChunk.id).where(
+        KnowledgeChunk.property_id == prop.id, KnowledgeChunk.source.like(f"{AREA_SOURCE_PREFIX}%")).limit(1))
+    if exists or not AREA_GUIDE.is_dir():
+        return 0
+    knowledge = KnowledgeService(session, None, prop.id)
+    total = 0
+    for path in sorted(AREA_GUIDE.glob("*.json")):
+        doc = json.loads(path.read_text())
+        source = f"{AREA_SOURCE_PREFIX} {doc['title']} (Wikipedia, CC BY-SA 4.0, {doc['url']})"
+        total += await knowledge.ingest(source, doc["text"])
+    await session.commit()
+    return total
+
+
 async def seed(session: AsyncSession) -> None:
+    existing = await session.scalar(select(Property).where(Property.slug == SLUG))
+    if existing:
+        await ensure_area_guide(session, existing)
+        return
     if await session.scalar(select(Property).limit(1)):
         return
     org = Organization(name="Steigenberger ALDAU Beach Hotel (demo)", api_key_hash=hash_api_key(DEMO_KEY))
@@ -129,3 +156,4 @@ async def seed(session: AsyncSession) -> None:
         for language, content in by_lang.items():
             await knowledge.upsert_fact(key, language, content)
     await session.commit()
+    await ensure_area_guide(session, prop)
