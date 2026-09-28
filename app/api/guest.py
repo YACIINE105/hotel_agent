@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import random
 from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import uuid4
@@ -172,7 +173,8 @@ async def create_quote(conversation_id: str, data: QuoteInput, session: SessionD
     return {"reply": reply, "quote": outcome.result["quote"]}
 
 
-LIVE_REFRESH_SECONDS = 25  # safety refresh + keep-alive, in case a notification was missed
+KEEPALIVE_SECONDS = 20  # comment line only: keeps proxies from closing idle streams, no DB work
+SAFETY_REFRESH_SECONDS = (90, 150)  # random range: re-read the DB in case a notification was missed
 
 
 @router.get("/conversations/{conversation_id}/events")
@@ -197,6 +199,7 @@ async def live_events(conversation_id: str, request: Request, settings: Settings
             return [{"id": m.id, "sender": m.sender, "content": m.content} for m in rows], state
 
     async def stream():
+        loop = asyncio.get_running_loop()
         queue = broker.subscribe(conversation_id)
         last_id, sent_state = after, {}
         try:
@@ -210,16 +213,24 @@ async def live_events(conversation_id: str, request: Request, settings: Settings
                 if public != sent_state:
                     sent_state = public
                     yield f"event: state\ndata: {json.dumps(public)}\n\n"
-                # Wake on a notification, when the typing indicator expires, or for a keep-alive refresh.
-                timeout = LIVE_REFRESH_SECONDS
+                # Sleep until a notification, the typing indicator expiring, or the (jittered) safety
+                # refresh. Keep-alives in between cost no database query, so thousands of idle
+                # streams don't refresh in lockstep.
+                deadline = loop.time() + random.uniform(*SAFETY_REFRESH_SECONDS)
                 if state["staff_typing"]:
-                    timeout = max(0.2, (state["typing_until"] - datetime.now(timezone.utc)).total_seconds() + 0.1)
-                try:
-                    await asyncio.wait_for(queue.get(), timeout)
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-                if await request.is_disconnected():
-                    return
+                    typing_left = (state["typing_until"] - datetime.now(timezone.utc)).total_seconds() + 0.1
+                    deadline = min(deadline, loop.time() + max(0.2, typing_left))
+                while True:
+                    wait = min(KEEPALIVE_SECONDS, deadline - loop.time())
+                    if wait <= 0:
+                        break
+                    try:
+                        await asyncio.wait_for(queue.get(), wait)
+                        break
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            return
+                        yield ": keep-alive\n\n"
         finally:
             broker.unsubscribe(conversation_id, queue)
 

@@ -571,7 +571,7 @@
     applyLang(saved?.lang || state.lang || (cfg.languages.includes(browser) ? browser : cfg.languages[0]));
     if (saved?.conv) {
       Object.assign(state, { conv: saved.conv, token: saved.token });
-      if (await catchUp(true)) { startPolling(); return; }
+      if (await catchUp(true)) { startLive(); return; }
     }
     const s = await (await fetch(`${API}/v1/properties/${HOTEL}/sessions`, { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: state.lang }) })).json();
@@ -579,7 +579,7 @@
     save();
     bubble("ai", s.greeting);
     quickActions();
-    startPolling();
+    startLive();
   }
 
   async function catchUp(renderAll) {
@@ -593,21 +593,57 @@
       state.lastId = Math.max(state.lastId, m.id);
       if (!renderAll && m.sender !== "staff") continue;  // guest/AI messages are already on screen
       if (m.sender === "system") continue;
-      const n = el("div", `msg ${m.sender === "guest" ? "guest" : m.sender}`);
-      n.dir = "auto";
-      if (m.sender === "staff") { n.append(el("span", "label mono", t.staff)); staffArrived = true; }
-      n.append(document.createTextNode(m.content));
-      add(n);
+      if (m.sender === "staff") { if (!showStaff(m)) continue; staffArrived = true; continue; }
+      add(el("div", `msg ${m.sender === "guest" ? "guest" : m.sender}`, m.content)).dir = "auto";
     }
     setStaffTyping(data.staff_typing && !staffArrived);
     if (renderAll && !data.messages.length) quickActions();
     return true;
   }
 
+  const shownStaff = new Set();
+  function showStaff(m) {  // render a staff message once, whichever channel delivered it
+    if (shownStaff.has(m.id)) return false;
+    shownStaff.add(m.id);
+    state.lastStaffId = Math.max(state.lastStaffId || 0, m.id);
+    const n = el("div", "msg staff");
+    n.dir = "auto";
+    n.append(el("span", "label mono", t.staff), document.createTextNode(m.content));
+    add(n);
+    return true;
+  }
+
   function startPolling() {
     if (state.poll) return;
-    // Every 2 s: staff replies and the "hotel team is typing" indicator.
+    // Fallback when push is unavailable: every 2 s, staff replies and the typing indicator.
     state.poll = setInterval(() => { if (!document.hidden) catchUp(false).catch(() => {}); }, POLL_MS);
+  }
+
+  // Push: the server streams staff replies, typing and pause state as they happen (no polling).
+  function startLive() {
+    if (!window.EventSource) return startPolling();
+    let failures = 0;
+    const connect = () => {
+      const url = `${API}/v1/conversations/${state.conv}/events?token=${encodeURIComponent(state.token)}&after=${state.lastStaffId || 0}`;
+      const es = new EventSource(url);
+      state.live = es;
+      es.onopen = () => { failures = 0; };
+      es.addEventListener("message", (ev) => {
+        const m = JSON.parse(ev.data);
+        if (showStaff(m)) setStaffTyping(false);
+      });
+      es.addEventListener("state", (ev) => {
+        const st = JSON.parse(ev.data);
+        state.paused = st.ai_paused;
+        setStaffTyping(st.staff_typing);
+      });
+      es.onerror = () => {
+        es.close();
+        if (++failures > 3) { startPolling(); return; }  // e.g. a proxy that blocks streaming
+        setTimeout(connect, 2000 * failures);
+      };
+    };
+    connect();
   }
 
   const queue = [];

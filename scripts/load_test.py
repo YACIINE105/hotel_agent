@@ -5,7 +5,8 @@
 
 chat: each simulated guest opens a session and sends --turns FAQ questions one after another.
       Reports time to first text, total reply time (p50/p95), throughput, and errors.
-poll: simulated open widgets each poll /messages every 2 s (what the widget does); reports latency.
+poll: simulated open widgets each poll /messages every 2 s (the fallback); reports latency.
+live: N open push streams (what the widget does now); staff replies to a sample, delivery latency.
 """
 
 import argparse
@@ -116,9 +117,55 @@ async def run_poll(base, levels, seconds):
                   f"{pct(lat, 99) * 1000:>6.0f}ms {errors:>6}")
 
 
+async def run_live(base, levels, staff_key, samples=20):
+    """Open N push streams (idle widgets), then send staff replies to a sample and time delivery."""
+    limits = httpx.Limits(max_connections=5000, max_keepalive_connections=5000)
+    async with httpx.AsyncClient(base_url=base, trust_env=False, timeout=None, limits=limits) as client:
+        print(f"{'streams':>7} {'open ok':>7} {'deliver p50':>12} {'deliver p95':>12} {'delivered':>9}")
+        for n in levels:
+            sessions = []
+            for chunk in range(0, n, 100):
+                batch = await asyncio.gather(*(client.post(f"/v1/properties/{HOTEL}/sessions", json={})
+                                               for _ in range(min(100, n - chunk))))
+                sessions += [r.json() for r in batch]
+            got: dict[str, float] = {}
+            opened = 0
+
+            async def listen(s):
+                nonlocal opened
+                url = f"/v1/conversations/{s['conversation_id']}/events?token={s['token']}"
+                try:
+                    async with client.stream("GET", url) as r:
+                        opened += r.status_code == 200
+                        async for line in r.aiter_lines():
+                            if line == "event: message":
+                                got[s["conversation_id"]] = time.perf_counter()
+                                return
+                except Exception:  # noqa: BLE001
+                    return
+
+            tasks = [asyncio.create_task(listen(s)) for s in sessions]
+            await asyncio.sleep(3 + n / 150)  # let every stream connect and finish its first DB read
+            sample = sessions[:: max(1, n // samples)][:samples]
+            sent = {}
+            for s in sample:
+                sent[s["conversation_id"]] = time.perf_counter()
+                await client.post(f"/v1/staff/conversations/{s['conversation_id']}/reply",
+                                  json={"text": "Hello from reception"}, headers={"X-API-Key": staff_key})
+            await asyncio.sleep(3)
+            lat = [got[c] - t for c, t in sent.items() if c in got]
+            print(f"{n:>7} {opened:>7} {pct(lat, 50) * 1000:>10.0f}ms {pct(lat, 95) * 1000:>10.0f}ms "
+                  f"{len(lat):>4}/{len(sent):<4}")
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["chat", "poll"])
+    ap.add_argument("mode", choices=["chat", "poll", "live"])
+    ap.add_argument("--streams", type=int, nargs="+", default=[500, 1000, 2000])
+    ap.add_argument("--staff-key", default="demo-aldau-staff-key")
     ap.add_argument("--base", default="http://localhost:8000")
     ap.add_argument("--concurrency", type=int, nargs="+", default=[1, 4, 8, 16])
     ap.add_argument("--turns", type=int, default=3)
@@ -127,8 +174,10 @@ def main():
     a = ap.parse_args()
     if a.mode == "chat":
         asyncio.run(run_chat(a.base, a.concurrency, a.turns))
-    else:
+    elif a.mode == "poll":
         asyncio.run(run_poll(a.base, a.widgets, a.seconds))
+    else:
+        asyncio.run(run_live(a.base, a.streams, a.staff_key))
 
 
 if __name__ == "__main__":
