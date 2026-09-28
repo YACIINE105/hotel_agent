@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,6 +14,7 @@ from app.config import Settings, get_settings
 from app.db import Base, make_engine, make_sessionmaker
 from app.errors import AppError, handle_app_error
 from app.providers import Providers
+from app.realtime import make_broker
 from app.seed import seed
 
 WEB = Path(__file__).parent / "web"
@@ -46,14 +48,17 @@ def create_app(settings: Settings | None = None, client: httpx.AsyncClient | Non
         if settings.seed_demo:
             async with app.state.sessionmaker() as session:
                 await seed(session)
+        app.state.loop = asyncio.get_running_loop()
+        app.state.broker = make_broker(settings.database_url)
+        await app.state.broker.start()
         yield
+        await app.state.broker.stop()
         if client is None:
             await http.aclose()
         await engine.dispose()
 
     app = FastAPI(title="Hotel Agent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
-    app.state.typing = {}  # conversation_id -> monotonic expiry of the staff typing indicator
     app.add_exception_handler(AppError, handle_app_error)
     # The widget is embedded on hotel websites; guest endpoints use bearer tokens, not cookies.
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],

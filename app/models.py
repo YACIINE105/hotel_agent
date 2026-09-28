@@ -82,6 +82,8 @@ class Conversation(Base):
     language: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(20), default="OPEN")  # OPEN | HANDOFF | CLOSED
     ai_paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Shared across API instances (was process memory): staff typing indicator expiry.
+    staff_typing_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 

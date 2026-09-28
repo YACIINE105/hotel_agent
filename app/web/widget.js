@@ -523,6 +523,10 @@
         clearStatus();
         if (!aiBubble) aiBubble = bubble("ai", "");
         aiBubble.textContent += e.text; scroll(); break;
+      case "rewrite": {  // server cleaned the reply (e.g. removed repeated sentences)
+        const target = aiBubble || [...log.querySelectorAll(".msg.ai")].pop();
+        if (target) target.textContent = e.text;
+        break; }
       case "offers": clearStatus(); aiBubble = null; offerCards(e.offers); break;
       case "quote": clearStatus(); aiBubble = null; quoteCard(e.quote); break;
       case "booking_form": aiBubble = null; bookingForm(); break;

@@ -75,3 +75,21 @@ def small_talk(question: str) -> dict | None:
         if pattern.search(question.strip()):
             return replies
     return None
+
+
+FREE_CLAIM = re.compile(
+    r"\b(free|complimentary|included|no charge|at no cost|gratuit\w*|inclus\w*|offert\w*)\b"
+    r"|مجان|مجانا|مجاناً|مجاني|مجانية|بدون تكلفة|بدون رسوم|مشمول",
+    re.IGNORECASE,
+)
+
+
+def unsupported_free_claim(answer: str, question: str, facts: list[dict]) -> list[dict] | None:
+    """If the answer says something is free/included but the matching approved facts don't,
+    return those facts (to answer with instead). None when the claim is supported or absent."""
+    if not FREE_CLAIM.search(answer):
+        return None
+    matched = match_facts(question + " " + answer, facts, limit=2)
+    if not matched or any(FREE_CLAIM.search(f["content"]) for f in matched):
+        return None
+    return matched

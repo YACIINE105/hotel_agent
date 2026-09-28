@@ -94,3 +94,52 @@ class SentenceChunker:
     def flush(self) -> list[str]:
         rest, self.buf = self.buf.strip(), ""
         return [rest] if rest else []
+
+
+def _norm(sentence: str) -> str:
+    return re.sub(r"[\W_]+", "", sentence.casefold())
+
+
+class RepetitionGuard:
+    """Detects degenerate loops (small quantized models can repeat one sentence until the token limit).
+
+    `allow(sentence)` returns False for a sentence already emitted; `looping` becomes True after the
+    second repeat, or when the tail of the raw text already occurred three times.
+    """
+
+    def __init__(self, max_repeats: int = 2):
+        self.seen: set[str] = set()
+        self.repeats = 0
+        self.max_repeats = max_repeats
+        self.looping = False
+
+    def allow(self, sentence: str) -> bool:
+        key = _norm(sentence)
+        if not key:
+            return True
+        if key in self.seen:
+            self.repeats += 1
+            if self.repeats >= self.max_repeats:
+                self.looping = True
+            return False
+        self.seen.add(key)
+        return True
+
+    def check_raw(self, text: str) -> None:
+        if len(text) > 240:
+            tail = text[-60:]
+            if text.count(tail) >= 3:
+                self.looping = True
+
+
+def dedupe_sentences(text: str) -> str:
+    """Remove repeated sentences, keeping the first occurrence and the original order."""
+    chunker = SentenceChunker(first_clause_min=10**9)
+    seen, out = set(), []
+    for sentence in chunker.feed(text + " ") + chunker.flush():
+        key = _norm(sentence)
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(sentence)
+    return " ".join(out).strip()

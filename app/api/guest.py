@@ -1,8 +1,8 @@
 """Guest-facing API used by the embeddable widget and any custom front end."""
 
+import asyncio
 import json
-import time
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import uuid4
 
@@ -60,8 +60,14 @@ class QuoteInput(BaseModel):
     special_requests: str | None = Field(default=None, max_length=500)
 
 
-def staff_typing(request: Request, conversation_id: str) -> bool:
-    return request.app.state.typing.get(conversation_id, 0) > time.monotonic()
+def _aware(dt: datetime | None) -> datetime | None:
+    # SQLite returns naive datetimes; values are always written in UTC.
+    return dt.replace(tzinfo=timezone.utc) if dt is not None and dt.tzinfo is None else dt
+
+
+def staff_typing(conv: Conversation) -> bool:
+    until = _aware(conv.staff_typing_until)
+    return until is not None and until > datetime.now(timezone.utc)
 
 
 @router.get("/properties/{slug}/widget-config")
@@ -120,7 +126,7 @@ async def list_messages(conversation_id: str, request: Request, session: Session
     return {
         "status": conv.status,
         "ai_paused": conv.ai_paused,
-        "staff_typing": staff_typing(request, conv.id),
+        "staff_typing": staff_typing(conv),
         "messages": [{"id": m.id, "sender": m.sender, "content": m.content, "created_at": m.created_at.isoformat()}
                      for m in rows],
     }
@@ -164,3 +170,58 @@ async def create_quote(conversation_id: str, data: QuoteInput, session: SessionD
     outcome, reply = await run_form_step(session, prop, conv, "prepare_booking",
                                          data.model_dump(exclude_none=True), text)
     return {"reply": reply, "quote": outcome.result["quote"]}
+
+
+LIVE_REFRESH_SECONDS = 25  # safety refresh + keep-alive, in case a notification was missed
+
+
+@router.get("/conversations/{conversation_id}/events")
+async def live_events(conversation_id: str, request: Request, settings: SettingsDep, token: str = "", after: int = 0):
+    """Push stream (SSE) of staff activity: replies, typing, and AI pause state.
+
+    Replaces 2-second polling: an idle open widget costs one connection and no database queries.
+    The token is a query parameter because browser EventSource cannot send headers.
+    """
+    async with request.app.state.sessionmaker() as session:
+        await guest_context(session, settings, conversation_id, token)
+    broker = request.app.state.broker
+
+    async def snapshot(last_id: int) -> tuple[list[dict], dict]:
+        async with request.app.state.sessionmaker() as session:
+            conv = await session.get(Conversation, conversation_id)
+            rows = (await session.scalars(
+                select(Message).where(Message.conversation_id == conversation_id, Message.id > last_id,
+                                      Message.sender == "staff").order_by(Message.id).limit(50))).all()
+            state = {"ai_paused": conv.ai_paused, "staff_typing": staff_typing(conv),
+                     "typing_until": _aware(conv.staff_typing_until)}
+            return [{"id": m.id, "sender": m.sender, "content": m.content} for m in rows], state
+
+    async def stream():
+        queue = broker.subscribe(conversation_id)
+        last_id, sent_state = after, {}
+        try:
+            yield "retry: 3000\n\n"
+            while True:
+                messages, state = await snapshot(last_id)
+                for m in messages:
+                    last_id = max(last_id, m["id"])
+                    yield f"event: message\ndata: {json.dumps(m, ensure_ascii=False)}\n\n"
+                public = {"ai_paused": state["ai_paused"], "staff_typing": state["staff_typing"] and not messages}
+                if public != sent_state:
+                    sent_state = public
+                    yield f"event: state\ndata: {json.dumps(public)}\n\n"
+                # Wake on a notification, when the typing indicator expires, or for a keep-alive refresh.
+                timeout = LIVE_REFRESH_SECONDS
+                if state["staff_typing"]:
+                    timeout = max(0.2, (state["typing_until"] - datetime.now(timezone.utc)).total_seconds() + 0.1)
+                try:
+                    await asyncio.wait_for(queue.get(), timeout)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                if await request.is_disconnected():
+                    return
+        finally:
+            broker.unsubscribe(conversation_id, queue)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

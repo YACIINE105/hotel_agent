@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: float = 60
     llm_max_tool_rounds: int = 4
+    # Replies are 1-3 sentences; a tight cap also bounds any runaway repetition.
+    llm_max_tokens: int = 450
+    llm_temperature: float = 0.3
     # OpenRouter reasoning control: "" = provider default, "off", or low/medium/high.
     llm_reasoning: str = ""
     # Extra JSON merged into chat requests, e.g. for local vLLM Qwen3.5 non-thinking mode:

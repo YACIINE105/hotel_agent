@@ -3,6 +3,7 @@ import base64
 import json
 from datetime import date, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -421,9 +422,24 @@ def test_booking_intent_without_dates_offers_form(client):
     assert not any(e["type"] == "booking_form" for e in send(client, conv, h, "Is parking free?"))
 
 
-def test_staff_typing_indicator_expires_and_clears_on_reply(client, monkeypatch):
-    import time as _time
+def expire_typing(client, conv):
+    """Move the stored typing expiry into the past (it is shared state in the database)."""
+    from datetime import datetime, timedelta, timezone
 
+    from sqlalchemy import update
+
+    from app.models import Conversation
+
+    async def run():
+        async with client.app.state.sessionmaker() as s:
+            await s.execute(update(Conversation).where(Conversation.id == conv)
+                            .values(staff_typing_until=datetime.now(timezone.utc) - timedelta(seconds=1)))
+            await s.commit()
+
+    client.portal.call(run)
+
+
+def test_staff_typing_indicator_expires_and_clears_on_reply(client):
     conv, h = start(client)
     staff = {"X-API-Key": DEMO_KEYS["atlas"]}
     assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
@@ -432,8 +448,7 @@ def test_staff_typing_indicator_expires_and_clears_on_reply(client, monkeypatch)
     client.post(f"/v1/staff/conversations/{conv}/reply", json={"text": "Hello!"}, headers=staff)
     assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
     client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=staff)
-    real = _time.monotonic
-    monkeypatch.setattr("app.api.guest.time.monotonic", lambda: real() + 6)
+    expire_typing(client, conv)
     assert client.get(f"/v1/conversations/{conv}/messages", headers=h).json()["staff_typing"] is False
     oran = {"X-API-Key": DEMO_KEYS["oran"]}
     assert client.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=oran).status_code == 404
@@ -567,3 +582,176 @@ def test_children_question_does_not_open_booking_form(client):
     script(client, [[("text", "Children under 6 stay free.")]])
     conv, h = start(client)
     assert not any(e["type"] == "booking_form" for e in send(client, conv, h, "Can children stay for free?"))
+
+
+
+# --- live push (SSE) ----------------------------------------------------------
+
+@pytest.fixture
+def live_server(tmp_path):
+    """A real uvicorn server in a thread: TestClient buffers whole responses, so it can't read SSE."""
+    import socket
+    import threading
+    import time as _time
+
+    import uvicorn
+
+    settings = Settings(_env_file=None, database_url=f"sqlite+aiosqlite:///{tmp_path}/live.db",
+                        llm_api_key="test", llm_model="fake-model", session_secret="test-secret", seed_demo=False)
+    app = create_app(settings)
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    while not server.started:
+        _time.sleep(0.05)
+    base = f"http://127.0.0.1:{port}"
+    with httpx.Client(base_url=base, trust_env=False, timeout=10) as c:
+        yield app, c
+    server.should_exit = True
+    thread.join(5)
+    reset_fake_store()
+
+
+def read_sse(response, until_types, limit=20):
+    """Collect SSE events from a streaming response until all until_types were seen."""
+    events, seen, current = [], set(), {}
+    for line in response.iter_lines():
+        if line.startswith("event: "):
+            current["type"] = line[7:]
+        elif line.startswith("data: "):
+            current["data"] = json.loads(line[6:])
+        elif line == "" and current:
+            events.append(current)
+            seen.add(current["type"])
+            current = {}
+            if until_types <= seen or len(events) >= limit:
+                break
+    return events
+
+
+def test_live_events_push_staff_typing_and_reply(live_server):
+    import asyncio as _asyncio
+    import threading
+    import time as _time
+
+    app, c = live_server
+
+    async def seed():
+        async with app.state.sessionmaker() as session:
+            await seed_test_hotels(session)
+
+    _asyncio.run_coroutine_threadsafe(seed(), _loop_of(app)).result(10)
+    s = c.post("/v1/properties/atlas-bay/sessions", json={"language": "en"}).json()
+    conv, token = s["conversation_id"], s["token"]
+    staff = {"X-API-Key": DEMO_KEYS["atlas"]}
+
+    def staff_actions():
+        with httpx.Client(base_url=str(c.base_url), trust_env=False) as sc:
+            _time.sleep(0.4)
+            sc.post(f"/v1/staff/conversations/{conv}/typing", json={"typing": True}, headers=staff)
+            _time.sleep(0.4)
+            sc.post(f"/v1/staff/conversations/{conv}/reply", json={"text": "Hi, this is reception."}, headers=staff)
+
+    threading.Thread(target=staff_actions, daemon=True).start()
+    t0 = _time.time()
+    with c.stream("GET", f"/v1/conversations/{conv}/events?token={token}") as r:
+        assert r.status_code == 200
+        events = read_sse(r, {"message"})
+    assert _time.time() - t0 < 5  # pushed, not waiting for the 25 s refresh
+    states = [e["data"] for e in events if e["type"] == "state"]
+    assert states[0] == {"ai_paused": False, "staff_typing": False}
+    assert {"ai_paused": False, "staff_typing": True} in states
+    message = next(e["data"] for e in events if e["type"] == "message")
+    assert message["content"] == "Hi, this is reception." and message["sender"] == "staff"
+
+
+def _loop_of(app):
+    """The event loop the live server runs on (captured when its lifespan started)."""
+    return app.state.loop
+
+
+def test_live_events_reject_bad_token(client):
+    conv, _ = start(client)
+    assert client.get(f"/v1/conversations/{conv}/events?token=nope").status_code == 403
+
+
+async def test_postgres_broker_fans_out_between_instances():
+    """Two brokers (as in two API processes) on one Postgres: a publish reaches the other."""
+    import os
+
+    url = os.environ.get("TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("set TEST_POSTGRES_URL (see scripts/postgres.py) to run Postgres tests")
+    from app.realtime import PostgresBroker
+
+    a, b = PostgresBroker(url), PostgresBroker(url)
+    await a.start()
+    await b.start()
+    try:
+        q = b.subscribe("conv-1")
+        await a.publish("conv-1", "message")
+        assert await asyncio.wait_for(q.get(), 3) == "message"
+    finally:
+        await a.stop()
+        await b.stop()
+
+
+def test_repetition_loop_is_stopped_deduplicated_and_rewritten(client):
+    golf = "يضم الفندق ملعب جولف من 9 حفر (بار 3). "
+    rounds = [[("text", "أهلاً بك. يضم الفندق 400 جناح. ")] + [("text", golf)] * 40 + [("text", "يضم الفندق ملعب جولف من 9 ح")]]
+    script(client, rounds)
+    conv, h = start(client, language="ar")
+    events = send(client, conv, h, "اهلا ممكن معلومات اكتر عن الفندق ؟")
+    spoken = [e["text"] for e in events if e["type"] == "sentence"]
+    assert spoken.count("يضم الفندق ملعب جولف من 9 حفر (بار 3).") == 1  # never spoken twice
+    rewrite = next(e["text"] for e in events if e["type"] == "rewrite")
+    assert rewrite == "أهلاً بك. يضم الفندق 400 جناح. يضم الفندق ملعب جولف من 9 حفر (بار 3)."
+    streamed = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert streamed.count("ملعب جولف") < 6  # the stream was cut early, not at the token limit
+    assert not any(e["type"] == "error" for e in events) and "كيف يمكنني مساعدتك" not in rewrite
+    stored = client.get(f"/v1/staff/conversations/{conv}", headers={"X-API-Key": DEMO_KEYS["atlas"]}).json()
+    assert stored["messages"][-1]["content"] == rewrite and stored["messages"][-1]["meta"]["repetition_stopped"]
+
+
+def test_partial_answer_is_kept_when_the_model_fails_mid_stream(client):
+    from app.errors import Unavailable
+
+    async def dies(messages, tools=None):
+        yield ("text", "Check-in starts at 14:00. ")
+        raise Unavailable("connection dropped")
+
+    client.app.state.providers.stream_chat = dies
+    conv, h = start(client, language="ar")
+    events = send(client, conv, h, "اهلا")  # a greeting: must NOT get the small-talk reply appended
+    text = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert text.startswith("Check-in starts at 14:00.") and "أهلاً بك!" not in text
+
+
+async def test_stream_hitting_max_tokens_keeps_the_text():
+    from app.config import Settings as S
+    from app.providers import Providers
+
+    body = ('data: {"choices":[{"index":0,"delta":{"content":"Pools are open."}}]}\n\n'
+            'data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n')
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text=body,
+                                                               headers={"content-type": "text/event-stream"}))
+    async with httpx.AsyncClient(transport=transport) as http:
+        p = Providers(S(_env_file=None, llm_api_key="k", llm_model="m", llm_base_url="http://x/v1"), http)
+        out = [x async for x in p.stream_chat([{"role": "user", "content": "hi"}])]
+    assert out == [("text", "Pools are open.")]
+
+
+def test_unsupported_free_claim_is_replaced_by_the_approved_fact(client):
+    script(client, [[("text", "Yes, the airport transfer is free.")]])
+    conv, h = start(client)
+    events = send(client, conv, h, "Is the airport transfer free?")
+    rewrite = next(e["text"] for e in events if e["type"] == "rewrite")
+    assert "4,000 DZD" in rewrite and "free" not in rewrite.lower()
+    # A supported claim stays: the test hotel's parking fact says it is free.
+    script(client, [[("text", "Yes, parking is free on site.")]])
+    events = send(client, conv, h, "Is parking free?")
+    assert not any(e["type"] == "rewrite" for e in events)

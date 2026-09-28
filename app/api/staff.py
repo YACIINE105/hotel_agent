@@ -1,10 +1,10 @@
 """Staff API: inbox, takeover, knowledge, bookings. Every query is scoped to the caller's organization."""
 
-import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api.deps import ProvidersDep, SessionDep, SettingsDep, StaffDep, staff_property
 from app.booking.connectors.fake import inject_fault
@@ -100,11 +100,12 @@ async def conversation(conversation_id: str, org: StaffDep, session: SessionDep)
 @router.post("/conversations/{conversation_id}/reply", status_code=201)
 async def reply(conversation_id: str, data: ReplyInput, request: Request, org: StaffDep, session: SessionDep):
     conv = await _conversation(session, org, conversation_id)
-    request.app.state.typing.pop(conv.id, None)
+    conv.staff_typing_until = None
     conv.ai_paused, conv.status = True, "HANDOFF"  # a human reply takes over the conversation
     message = Message(conversation_id=conv.id, property_id=conv.property_id, sender="staff", content=data.text)
     session.add(message)
     await session.commit()
+    await request.app.state.broker.publish(conv.id, "message")
     return {"id": message.id}
 
 
@@ -112,17 +113,19 @@ async def reply(conversation_id: str, data: ReplyInput, request: Request, org: S
 async def typing(conversation_id: str, data: TypingInput, request: Request, org: StaffDep, session: SessionDep):
     """Staff typing indicator. The inbox sends this every ~2 s while typing; it expires after 5 s.
 
-    Kept in process memory; with several API instances this belongs in Postgres or Redis.
+    Stored on the conversation row so every API instance sees it; guests are notified by push.
     """
     conv = await _conversation(session, org, conversation_id)
-    if data.typing:
-        request.app.state.typing[conv.id] = time.monotonic() + 5
-    else:
-        request.app.state.typing.pop(conv.id, None)
+    until = datetime.now(timezone.utc) + timedelta(seconds=5) if data.typing else None
+    # Core UPDATE that keeps updated_at, so typing doesn't reorder the inbox.
+    await session.execute(update(Conversation).where(Conversation.id == conv.id)
+                          .values(staff_typing_until=until, updated_at=Conversation.updated_at))
+    await session.commit()
+    await request.app.state.broker.publish(conv.id, "typing")
 
 
 @router.post("/conversations/{conversation_id}/takeover")
-async def takeover(conversation_id: str, data: TakeoverInput, org: StaffDep, session: SessionDep):
+async def takeover(conversation_id: str, data: TakeoverInput, request: Request, org: StaffDep, session: SessionDep):
     conv = await _conversation(session, org, conversation_id)
     conv.ai_paused = data.paused
     conv.status = "HANDOFF" if data.paused else "OPEN"
@@ -130,6 +133,7 @@ async def takeover(conversation_id: str, data: TakeoverInput, org: StaffDep, ses
         for h in (await session.scalars(select(Handoff).where(Handoff.conversation_id == conv.id))).all():
             h.status = "RESOLVED"
     await session.commit()
+    await request.app.state.broker.publish(conv.id, "state")
     return {"ai_paused": conv.ai_paused, "status": conv.status}
 
 

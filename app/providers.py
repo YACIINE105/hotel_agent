@@ -54,8 +54,8 @@ class Providers:
             "model": self.s.llm_model,
             "messages": messages,
             "stream": True,
-            "temperature": 0.3,
-            "max_tokens": 900,
+            "temperature": self.s.llm_temperature,
+            "max_tokens": self.s.llm_max_tokens,
         }
         if tools:
             body["tools"] = tools
@@ -98,7 +98,8 @@ class Providers:
                             slot["name"] += fn.get("name") or ""
                             slot["arguments"] += fn.get("arguments") or ""
                         if choice.get("finish_reason") == "length":
-                            raise ValueError("truncated")
+                            # Hit the reply limit: keep what was written (it was already streamed).
+                            log.info("model reply reached max_tokens=%s", self.s.llm_max_tokens)
                         if choice.get("finish_reason"):
                             finished = True
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
