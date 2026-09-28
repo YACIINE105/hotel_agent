@@ -58,7 +58,7 @@ async def voice(ws: WebSocket, conversation_id: str, token: str = ""):
                         continue
                     if event["type"] == "sentence":
                         speaker.say(event["text"])
-                    elif event["type"] in ("status", "paused", "error"):
+                    elif event["type"] in ("status", "error"):
                         speaker.say(event.get("text") or event.get("detail", ""), kind=event["type"])
             await speaker.finish()
         except asyncio.CancelledError:

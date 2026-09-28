@@ -37,11 +37,6 @@ UNAVAILABLE = {
     "fr": "Désolé, je rencontre un problème. Un membre de notre équipe peut vous aider.",
 }
 
-PAUSED = {
-    "en": "A member of our team is handling this conversation and will reply shortly.",
-    "ar": "يتولى أحد أعضاء فريقنا هذه المحادثة وسيرد عليك قريباً.",
-    "fr": "Un membre de notre équipe gère cette conversation et vous répondra bientôt.",
-}
 
 
 def detect(text: str) -> str:

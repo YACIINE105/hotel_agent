@@ -163,6 +163,9 @@ def test_handoff_pauses_ai_and_staff_reply_reaches_guest(client):
     llm = script(client, [])
     paused = send(client, conv, h, "Hello?")
     assert paused[0]["type"] == "paused" and llm.requests == []
+    assert not any(e["type"] == "delta" or e.get("text") for e in paused)  # no automatic notice to the guest
+    inbox = client.get(f"/v1/staff/conversations/{conv}", headers={"X-API-Key": DEMO_KEYS["atlas"]}).json()
+    assert inbox["messages"][-1]["content"] == "Hello?" and inbox["messages"][-1]["sender"] == "guest"
     staff = {"X-API-Key": DEMO_KEYS["atlas"]}
     assert client.post(f"/v1/staff/conversations/{conv}/reply", json={"text": "Hi, I'm Samir."}, headers=staff).status_code == 201
     msgs = client.get(f"/v1/conversations/{conv}/messages", headers=h).json()

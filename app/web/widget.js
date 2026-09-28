@@ -531,7 +531,7 @@
         result(true, `${r.reference} · ${r.room_name}`, `${fmtDate(r.check_in)} – ${fmtDate(r.check_out)} · ${money(r.total, r.currency)} · ${r.status}`);
         break; }
       case "handoff": state.paused = true; add(el("div", "note", t.handoff)); break;
-      case "paused": clearStatus(); state.paused = true; bubble("ai", e.text); break;
+      case "paused": clearStatus(); state.paused = true; break;  // staff are handling the chat: stay silent
       case "error": clearStatus(); bubble("ai", e.detail); break;
       case "transcript":
         clearStatus();

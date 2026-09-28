@@ -152,7 +152,9 @@ class TurnRunner:
         await self.session.commit()
 
         if self.conv.ai_paused or not self.prop.ai_enabled:
-            yield {"type": "paused", "text": lang.localized(lang.PAUSED, guest_lang)}
+            # Staff are handling this chat: deliver the message to them silently. No automatic
+            # "a team member will reply" notice; the guest sees staff typing and their replies.
+            yield {"type": "paused"}
             yield {"type": "done", "message_id": None}
             return
 
