@@ -194,7 +194,9 @@ class TurnRunner:
         # Sequential awaits on one AsyncSession; only the embedding call could overlap.
         history = await self._history()
         facts = await knowledge.facts(guest_lang)
-        documents = await knowledge.search(text, self.settings.rag_top_k)
+        # An approved fact already answers it ("check-in?", "parking?"): skip the area-guide documents,
+        # which only add prompt tokens (load test: ~2,000 extra characters per turn, ~2x slower).
+        documents = [] if match_facts(text, facts) else await knowledge.search(text, self.settings.rag_top_k)
         mark("context_ms")
 
         tz = ZoneInfo(self.prop.timezone)

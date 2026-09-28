@@ -23,7 +23,7 @@ from app.db import Base, make_engine, make_sessionmaker  # noqa: E402
 from app.knowledge.bm25 import BM25Index  # noqa: E402
 from app.knowledge.service import KnowledgeService  # noqa: E402
 from app.models import KnowledgeChunk, Property  # noqa: E402
-from app.seed import seed  # noqa: E402
+from app.seed import SLUG, seed  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -36,7 +36,7 @@ async def main(scale: int):
     sm = make_sessionmaker(engine)
     async with sm() as s:
         await seed(s)
-        prop = await s.scalar(select(Property))
+        prop = await s.scalar(select(Property).where(Property.slug == SLUG))
         chunks = (await s.scalars(select(KnowledgeChunk))).all()
         print(f"corpus: {len(chunks)} passages from {len({c.source for c in chunks})} documents\n")
         for c in cases:  # every expected phrase must really exist in the corpus

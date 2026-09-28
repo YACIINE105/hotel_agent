@@ -21,6 +21,8 @@ uv sync
 
 - Guest demo: http://localhost:8000/ is a landing page for **Steigenberger ALDAU Beach Hotel, Hurghada**, with the widget. The hotel facts come from its official page; availability and prices are simulated. Book through the form (dates, adults, children's ages, then guest details, then Confirm), or chat and talk by voice with the mic button.
 - Staff inbox: http://localhost:8000/inbox, key `demo-aldau-staff-key`. It refreshes every 2 s. While staff type a reply, the guest sees "Hotel team is typing".
+- **Travel shopper** (second business model): http://localhost:8000/shop searches many booking sources, compares prices per hotel, and books the cheapest of the offers you select. Demo sources are simulated with fictional hotels; set `LITEAPI_KEY` (bookable, free sandbox) and/or `SERPAPI_KEY` (Google Hotels prices from Booking.com, Expedia, Hotels.com...) in `.env` to connect real ones. Staff key: `demo-travel-staff-key`.
+- Database: Postgres (`uv run python scripts/postgres.py` prints the URL; `start_stack.sh` starts it). `WORKERS=2` runs several API processes.
 - API docs: http://localhost:8000/docs
 - Tests: `uv run pytest`. Live check against the running servers: `uv run python scripts/smoke_live.py --voice`
 - Model latency benchmark: `uv run python scripts/bench_models.py moonshotai/kimi-k3:off deepseek/deepseek-v4.1-flash`

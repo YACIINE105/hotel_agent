@@ -57,7 +57,8 @@ class BM25Index:
             for t in tf:
                 self.postings.setdefault(t, []).append(i)
 
-    def search(self, query: str, k: int = 4, min_score: float = 0.2) -> list[tuple[float, dict]]:
+    def search(self, query: str, k: int = 4, min_score: float = 0.2, relative: float = 0.4,
+               min_coverage: float = 0.5) -> list[tuple[float, dict]]:
         """min_score is low on purpose: with few passages even a perfect match scores ~1 (small IDF)."""
         terms = set(tokenize(query))
         scores: dict[int, float] = {}
@@ -77,4 +78,15 @@ class BM25Index:
                 covered = sum(1 for t in known if t in self.tfs[i])
                 scores[i] *= 0.5 + 0.5 * covered / len(known)
         ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
-        return [(s, self.docs[i]) for i, s in ranked[:k] if s >= min_score]
+        if not ranked:
+            return []
+        # Relevance gates: every irrelevant passage costs model time (a small GPU model pays per token).
+        top = ranked[0][1]
+        out = []
+        for i, sc in ranked:
+            covered = sum(1 for t in known if t in self.tfs[i]) / len(known)
+            if sc >= min_score and sc >= relative * top and covered >= min_coverage:
+                out.append((sc, self.docs[i]))
+            if len(out) == k:
+                break
+        return out
