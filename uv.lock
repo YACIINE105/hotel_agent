@@ -260,6 +260,7 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -282,6 +283,7 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.4.0" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
+    { name = "websockets", specifier = ">=17.1" },
 ]
 
 [[package]]

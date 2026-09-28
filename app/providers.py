@@ -42,6 +42,10 @@ class Providers:
         }
         if tools:
             body["tools"] = tools
+        if self.s.llm_reasoning == "off":
+            body["reasoning"] = {"enabled": False}
+        elif self.s.llm_reasoning:
+            body["reasoning"] = {"effort": self.s.llm_reasoning}
         calls: dict[int, dict] = {}
         finished = False
         try:

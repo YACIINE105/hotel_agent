@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hotel Agent Demo</title>
+  <style>
+    :root { --bg: #fbf8f3; --ink: #1d2a30; --muted: #5d6b72; --accent: #0f4c5c; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #12181b; --ink: #e8eef0; --muted: #9fb0b7; --accent: #5fb3c6; --card: #1b2327; } }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+    header { padding: 48px 16px 24px; max-width: 880px; margin: auto; }
+    h1 { font-size: clamp(28px, 5vw, 44px); margin: 0 0 8px; }
+    p { color: var(--muted); line-height: 1.6; }
+    main { max-width: 880px; margin: auto; padding: 0 16px 120px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card { background: var(--card); border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.06); }
+    .card h3 { margin: 0 0 6px; }
+    code { background: rgba(127,127,127,.15); padding: 2px 6px; border-radius: 6px; font-size: 13px; word-break: break-all; }
+    a { color: var(--accent); }
+    nav { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="name">Hotel</h1>
+    <p>This page stands in for a hotel website. The chat bubble in the corner is the embeddable agent: it answers
+      from this hotel's approved information, searches live (simulated) availability, shows exact terms, and books only
+      after the guest presses <strong>Confirm</strong>. Tap 🎙 for voice mode.</p>
+    <nav>
+      <a href="/?hotel=atlas-bay">Atlas Bay Hotel (EN/AR/FR)</a>
+      <a href="/?hotel=oran-medina">Oran Medina Suites (other organization)</a>
+      <a href="/inbox">Staff inbox</a>
+      <a href="/docs">API docs</a>
+    </nav>
+  </header>
+  <main>
+    <div class="card"><h3>Try asking</h3><p>“Do you have a room for 2 adults and a 5-year-old next Friday for two nights?”<br>“هل يوجد موقف سيارات؟”<br>“À quelle heure est le petit-déjeuner ?”</p></div>
+    <div class="card"><h3>Embed on any site</h3><p><code id="snippet"></code></p></div>
+    <div class="card"><h3>Test failures</h3><p>In the staff inbox, arm a simulator fault (price change, timeout after success, sold out), then confirm a booking.</p></div>
+  </main>
+  <script>
+    const hotel = new URLSearchParams(location.search).get("hotel") || "atlas-bay";
+    document.getElementById("name").textContent = hotel === "oran-medina" ? "Oran Medina Suites" : "Atlas Bay Hotel";
+    document.getElementById("snippet").textContent = `<script src="${location.origin}/static/widget.js" data-hotel="${hotel}" defer><\/script>`;
+    const s = document.createElement("script");
+    s.src = "/static/widget.js"; s.dataset.hotel = hotel; s.dataset.open = "true";
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>

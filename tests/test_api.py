@@ -111,6 +111,10 @@ def test_booking_flow_through_tools_and_explicit_confirmation(client):
     ])
     events = send(client, conv, h, "Standard flexible please. Amina Haddad, amina@example.com")
     assert std["offer_id"] in json.dumps(llm.requests[0]["messages"])
+    # The earlier search is replayed as a real tool call + result, not just narrated text.
+    replay = llm.requests[0]["messages"]
+    assert any(m.get("tool_calls") and m["tool_calls"][0]["function"]["name"] == "search_availability" for m in replay)
+    assert any(m["role"] == "tool" and std["offer_id"] in m["content"] for m in replay)
     quote = next(e for e in events if e["type"] == "quote")["quote"]
     assert quote["total"] == "24000.00" and quote["cancellation"]["refundable"] is True
 

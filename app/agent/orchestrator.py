@@ -42,25 +42,34 @@ Booking rules:
 - When the guest chooses, collect first name, last name, and email, then call prepare_booking with the offer_id.
 - The guest confirms by pressing Confirm on the summary. You cannot confirm, hold, or complete bookings and must never say a booking is confirmed unless a system message reports a confirmation reference.
 - For an existing booking, ask for the booking reference and the last name, then call find_reservation.
+- Only tool results in this conversation prove that offers, a booking summary, or a reservation exist. Never claim one exists unless the tool returned it.
+- Never announce an action without doing it: when you have what a tool needs, call the tool in the same reply instead of saying "let me check" or "I'll prepare".
 - Call handoff_to_staff when the guest asks for a person or the request needs staff: complaints, changes, cancellations, special exceptions.
 
 Hotel facts (JSON): {facts}
 Relevant documents (JSON): {documents}"""
 
 
-def _history_line(m: Message) -> dict:
+def _history_lines(m: Message) -> list[dict]:
+    """Rebuild the model's view of a past message, including the tool calls it really made.
+
+    Replaying only the final text teaches the model that announcing an action is enough;
+    replaying the calls and results keeps it calling tools.
+    """
     if m.sender == "guest":
-        return {"role": "user", "content": m.content}
-    content = m.content
-    if m.sender == "staff":
-        content = f"[Hotel staff wrote] {content}"
-    elif m.sender == "system":
-        content = f"[System] {content}"
-    offers = (m.meta or {}).get("offers")
-    if offers:
-        brief = [f"{o['offer_id']} {o['room_name']} {o['rate_plan']} {o['total']} {o['currency']}" for o in offers]
-        content += "\n[Offers shown to guest: " + "; ".join(brief) + "]"
-    return {"role": "assistant", "content": content}
+        return [{"role": "user", "content": m.content}]
+    if m.sender in ("staff", "system"):
+        label = "Hotel staff wrote" if m.sender == "staff" else "System"
+        return [{"role": "assistant", "content": f"[{label}] {m.content}"}]
+    lines = []
+    trace = (m.meta or {}).get("tool_trace", [])
+    if trace:
+        lines.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": t["id"], "type": "function", "function": {"name": t["name"], "arguments": t["arguments"]}}
+            for t in trace]})
+        lines += [{"role": "tool", "tool_call_id": t["id"], "content": t["result"]} for t in trace]
+    lines.append({"role": "assistant", "content": m.content or "..."})
+    return lines
 
 
 class TurnRunner:
@@ -131,7 +140,7 @@ class TurnRunner:
             today=today.date().isoformat(), language=lang.NAMES.get(guest_lang, "English"),
             facts=json.dumps(facts, ensure_ascii=False), documents=json.dumps(documents, ensure_ascii=False),
         )
-        messages = [{"role": "system", "content": system}] + [_history_line(m) for m in history]
+        messages = [{"role": "system", "content": system}] + [line for m in history for line in _history_lines(m)]
 
         connector = connector_for(self.prop)
         executor = ToolExecutor(BookingService(self.session, self.prop, connector), self.conv)
@@ -147,6 +156,8 @@ class TurnRunner:
                 async for kind, payload in self.providers.stream_chat(messages, tools):
                     if kind == "text":
                         mark("first_token_ms")
+                        if not round_text and answer and not answer[-1].isspace() and not payload[:1].isspace():
+                            payload = " " + payload  # keep rounds separated after a tool call
                         round_text += payload
                         clean = cite_filter.feed(payload)
                         if clean:
@@ -176,14 +187,17 @@ class TurnRunner:
                     outcome = await executor.run(call["name"], call["arguments"])
                     tool_log.append({"name": call["name"], "ok": "error" not in outcome.result,
                                      "ms": int((time.perf_counter() - started) * 1000)})
+                    result_json = json.dumps(outcome.result, ensure_ascii=False)
+                    meta.setdefault("tool_trace", []).append({
+                        "id": call["id"], "name": call["name"], "arguments": call["arguments"] or "{}",
+                        "result": result_json[:6000]})
                     for event in outcome.events:
                         if event["type"] == "offers":
                             meta["offers"] = event["offers"]
                         elif event["type"] == "quote":
                             meta["quote_id"] = event["quote"]["quote_id"]
                         yield event
-                    messages.append({"role": "tool", "tool_call_id": call["id"],
-                                     "content": json.dumps(outcome.result, ensure_ascii=False)})
+                    messages.append({"role": "tool", "tool_call_id": call["id"], "content": result_json})
             tail = cite_filter.flush()
             if tail:
                 yield {"type": "delta", "text": tail}

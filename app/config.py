@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_timeout_seconds: float = 60
     llm_max_tool_rounds: int = 4
+    # OpenRouter reasoning control: "" = provider default, "off", or low/medium/high.
+    llm_reasoning: str = ""
 
     # Optional embeddings; keyword retrieval is used when unset.
     embedding_model: str = ""

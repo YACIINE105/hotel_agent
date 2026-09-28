@@ -21,7 +21,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.4.0", "pytest-asyncio>=1.2.0"]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.2.0",
+    "websockets>=17.1",
+]
 
 [tool.uv]
 package = false
