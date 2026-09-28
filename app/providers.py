@@ -59,6 +59,7 @@ class Providers:
         }
         if tools:
             body["tools"] = tools
+        body.update(self.s.llm_extra_body)
         if self.s.llm_reasoning == "off":
             body["reasoning"] = {"enabled": False}
         elif self.s.llm_reasoning:

@@ -4,10 +4,12 @@ Confirming a booking is deliberately not a tool: it needs an explicit guest acti
 """
 
 import json
+import re
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
+from app.agent.language import HANDED_OFF, QUOTE_READY
 from app.booking.contracts import AvailabilityQuery, Capability, GuestDetails
 from app.booking.service import BookingService, offer_view, quote_view
 from app.errors import AppError
@@ -67,11 +69,41 @@ SCHEMAS = {
 }
 
 
-def tool_definitions(capabilities: frozenset[Capability]) -> list[dict]:
+BOOKING_INTENT = re.compile(
+    r"\b(rooms?|book(ing|ed)?|reserv\w*|availab\w*|vacan\w*|price|rates?|cost|nights?|stay|tonight|"
+    r"tomorrow|weekend|check.?in date|chambres?|réserv\w*|disponib\w*|prix|tarifs?|nuits?|séjour|ce soir|demain)\b"
+    r"|غرف|حجز|احجز|متاح|متوفر|سعر|أسعار|ليلة|ليال|الليلة|غدا"
+    r"|\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}",
+    re.IGNORECASE,
+)
+HUMAN_INTENT = re.compile(
+    r"\b(human|person|someone|staff|manager|agent|reception(ist)?|complain\w*|speak to|talk to|refund|cancel\w*|"
+    r"change my|modify|personne|humain|responsable|plainte|annul\w*|modifier|conseiller)\b"
+    r"|موظف|شخص|مدير|إنسان|شكوى|أشتكي|إلغاء|الغاء|تعديل|استرداد",
+    re.IGNORECASE,
+)
+RESERVATION_INTENT = re.compile(r"\b(reference|confirmation|my booking|ma réservation|FK-)|رقم الحجز|حجزي", re.IGNORECASE)
+
+
+def tool_definitions(capabilities: frozenset[Capability], text: str = "", booking_context: bool = True) -> list[dict]:
+    """Offer only the tools this turn could need.
+
+    Small models call search_availability for any question ("is parking free?"). Booking tools
+    are offered only when the message or conversation shows booking intent; this also keeps the
+    prompt shorter.
+    """
+    wanted = set()
+    # Small models hand off on routine questions, which pauses the AI; offer it only when asked.
+    if HUMAN_INTENT.search(text):
+        wanted.add("handoff_to_staff")
+    if booking_context or BOOKING_INTENT.search(text):
+        wanted |= {"search_availability", "prepare_booking", "find_reservation"}
+    if RESERVATION_INTENT.search(text):
+        wanted.add("find_reservation")
     return [
         {"type": "function", "function": {"name": name, "description": s["description"], "parameters": s["parameters"]}}
         for name, s in SCHEMAS.items()
-        if s["requires"] is None or s["requires"] in capabilities
+        if name in wanted and (s["requires"] is None or s["requires"] in capabilities)
     ]
 
 
@@ -79,6 +111,8 @@ def tool_definitions(capabilities: frozenset[Capability]) -> list[dict]:
 class ToolOutcome:
     result: dict  # returned to the model
     events: list[dict] = field(default_factory=list)  # sent to the guest UI
+    # Localized fixed reply that ends the turn: critical steps don't depend on model wording.
+    final_reply: dict | None = None
 
 
 class ToolExecutor:
@@ -130,6 +164,7 @@ class ToolExecutor:
             {"quote": view, "note": "The summary with a Confirm button is shown. Ask the guest to review "
              "and press Confirm. The booking is NOT made yet."},
             [{"type": "quote", "quote": view}],
+            final_reply=QUOTE_READY,
         )
 
     async def find_reservation(self, args: dict) -> ToolOutcome:
@@ -148,4 +183,4 @@ class ToolExecutor:
         self.conversation.ai_paused = True
         await session.commit()
         return ToolOutcome({"handed_off": True, "note": "Tell the guest a team member will reply here soon."},
-                           [{"type": "handoff"}])
+                           [{"type": "handoff"}], final_reply=HANDED_OFF)

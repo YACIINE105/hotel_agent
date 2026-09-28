@@ -1,4 +1,7 @@
-"""Time-to-first-token and tool-call correctness per model, using the real agent prompt.
+"""Time-to-first-token, tool calls, and Arabic answers per model.
+
+Local vLLM: LLM_BASE_URL=http://localhost:8003/v1 LLM_API_KEY=local \\
+  LLM_EXTRA_BODY='{"chat_template_kwargs":{"enable_thinking":false}}' uv run python scripts/bench_models.py qwen3.5-2b
 
     uv run python scripts/bench_models.py model1 model2:off ...   (":off"/":low" sets reasoning)
 """
@@ -19,9 +22,12 @@ from app.booking.connectors.fake import FakeReservationConnector
 from app.config import get_settings
 from app.providers import Providers
 
+CI, CO = date.today() + timedelta(days=20), date.today() + timedelta(days=22)
 PROMPTS = {
     "faq": "What time is breakfast and is parking free?",
-    "tool": f"Room for 2 adults from {date.today() + timedelta(days=20)} to {date.today() + timedelta(days=22)}?",
+    "tool": f"Room for 2 adults from {CI} to {CO}?",
+    "faq_ar": "متى يقدم الإفطار؟ وهل موقف السيارات مجاني؟",
+    "tool_ar": f"هل لديكم غرفة لشخصين بالغين من {CI} إلى {CO}؟",
 }
 SYSTEM = ("You are the front desk of Atlas Bay Hotel. Be brief, plain text. Facts: breakfast 06:30-10:30 included; "
           "free on-site parking. Use search_availability for availability; never invent prices. Today is "
@@ -47,7 +53,7 @@ async def main():
     async with httpx.AsyncClient() as client:
         for spec in sys.argv[1:]:
             model, _, reasoning = spec.partition(":")
-            providers = Providers(base.model_copy(update={"llm_model": model, "llm_reasoning": reasoning}), client)
+            providers = Providers(base.model_copy(update={"llm_model": model, "llm_reasoning": reasoning if reasoning != "default" else ""}), client)
             for name, prompt in PROMPTS.items():
                 runs = []
                 for _ in range(2):
@@ -56,7 +62,12 @@ async def main():
                     except Exception as exc:  # report and continue with the next model
                         runs.append((None, None, f"ERROR {exc}", []))
                 best = min((r for r in runs if r[0]), default=runs[-1], key=lambda r: r[0])
-                ok = ("search_availability" in best[3]) if name == "tool" else bool(best[2])
+                if name.startswith("tool"):
+                    ok = "search_availability" in best[3]
+                elif name.endswith("_ar"):  # must answer in Arabic script
+                    ok = sum("\u0600" <= c <= "\u06ff" for c in best[2]) > len(best[2]) / 3
+                else:
+                    ok = bool(best[2])
                 print(f"{spec:42} {name:4} first={best[0] and round(best[0], 2)}s total={best[1] and round(best[1], 2)}s "
                       f"ok={ok} tools={best[3]} text={best[2]!r}")
 

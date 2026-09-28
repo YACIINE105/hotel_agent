@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     llm_max_tool_rounds: int = 4
     # OpenRouter reasoning control: "" = provider default, "off", or low/medium/high.
     llm_reasoning: str = ""
+    # Extra JSON merged into chat requests, e.g. for local vLLM Qwen3.5 non-thinking mode:
+    # {"chat_template_kwargs": {"enable_thinking": false}}
+    llm_extra_body: dict = {}
 
     # Optional embeddings; keyword retrieval is used when unset.
     embedding_model: str = ""

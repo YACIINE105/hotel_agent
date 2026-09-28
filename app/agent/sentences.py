@@ -32,6 +32,36 @@ class CitationFilter:
         return out
 
 
+class MarkdownFilter:
+    """Small models add markdown despite instructions; replies may be spoken, so strip it.
+
+    Removes emphasis/code markers anywhere and bullet/heading markers at line starts.
+    """
+
+    def __init__(self):
+        self.line_start = True
+
+    def feed(self, text: str) -> str:
+        out = []
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch in "*`_" and not (ch == "_" and out and out[-1].isalnum()):
+                i += 1
+                continue
+            if self.line_start:
+                if ch in " \t":
+                    i += 1
+                    continue
+                if ch in "#-•" or (ch == "+" and text[i + 1 : i + 2] == " "):
+                    i += 1
+                    continue
+            out.append(ch)
+            self.line_start = ch == "\n"
+            i += 1
+        return "".join(out)
+
+
 class SentenceChunker:
     """Emits complete sentences. The first segment may be cut at a clause boundary so
     speech can start sooner; later segments wait for full sentences to sound natural."""

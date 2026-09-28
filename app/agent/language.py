@@ -83,3 +83,16 @@ def plausible_transcript(text: str, languages: list[str]) -> bool:
     if len(letters) < 3:
         return False
     return sum(_script(c) in allowed for c in letters) / len(letters) >= 0.8
+
+
+QUOTE_READY = {
+    "en": "Here is your booking summary. Please check the details and press Confirm to book.",
+    "ar": "هذا ملخص حجزك. يرجى مراجعة التفاصيل ثم الضغط على تأكيد لإتمام الحجز.",
+    "fr": "Voici le récapitulatif de votre réservation. Vérifiez les détails puis appuyez sur Confirmer.",
+}
+
+HANDED_OFF = {
+    "en": "I've passed this to our team; a staff member will reply here shortly.",
+    "ar": "لقد حولت طلبك إلى فريقنا، وسيرد عليك أحد الموظفين هنا قريباً.",
+    "fr": "J'ai transmis votre demande à notre équipe ; un membre du personnel vous répondra ici rapidement.",
+}

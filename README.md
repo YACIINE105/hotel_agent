@@ -9,9 +9,10 @@ Product spec: `../CustomerSupport/HOTEL_AI_AGENT_PRODUCT_PLAN.md`. Build plan: `
 ```bash
 cp .env.example .env              # set LLM_API_KEY, LLM_MODEL, SESSION_SECRET
 uv sync
-./scripts/run_asr.sh              # terminal 1: Qwen3-ASR on vLLM (~/vllm-env), port 8001
-./scripts/run_tts.sh              # terminal 2: Kokoro TTS (~/kokoro-env), port 8002
-./scripts/run_api.sh              # terminal 3: API + demo, port 8000
+./scripts/run_asr.sh              # terminal 1: Qwen3-ASR on vLLM (~/vllm-env), port 8001. START FIRST.
+./scripts/run_llm.sh              # terminal 2: local Qwen3.5-2B on vLLM, port 8003 (after ASR is up)
+./scripts/run_tts.sh              # terminal 3: Kokoro TTS (~/kokoro-env), port 8002
+./scripts/run_api.sh              # terminal 4: API + demo, port 8000
 ```
 
 - Guest demo: http://localhost:8000/ (append `?hotel=oran-medina` for the second hotel). The 🎙 button enters voice mode.
@@ -53,6 +54,41 @@ POST /bookings/confirm  ◄── the only booking path: an explicit guest click
 | Streaming text → citation-free sentences | `app/agent/sentences.py` |
 | Voice: ASR → agent → in-order TTS, barge-in | `app/api/voice.py`, `app/voice/pipeline.py`, `app/web/widget.js` |
 
+### Local model (6 GB GPU)
+
+`scripts/run_llm.sh` serves **Qwen3.5-2B, AWQ 4-bit** (`cyankiwi/Qwen3.5-2B-AWQ-4bit`). It supports 201 languages including Arabic, has native tool calling in Qwen's XML format (`--tool-call-parser qwen3_coder`), runs in non-thinking mode, and is text-only (`--language-model-only` skips the vision encoder).
+
+VRAM budget on the RTX 3060 Laptop (6144 MiB):
+
+| Process | `--gpu-memory-utilization` | Steady use |
+|---|---|---|
+| Qwen3-ASR-0.6B (1 audio per request, 1024-token context, max 4 requests) | 0.46 | ~2.1 GB |
+| Qwen3.5-2B AWQ + CUDA graphs (8k context, 56k-token KV cache, max 4 requests) | 0.50 | ~3.1 GB |
+| **Total** | | **~5.2 GB** (peak 5.6 GB at startup) |
+
+Start ASR before the LLM; the reverse order fails the KV-cache check. A 4B model (3.4–4 GB of 4-bit weights) does not fit next to ASR. vLLM loads from the local cache only (`HF_HUB_OFFLINE=1`), because an in-server download through the proxy stalled silently. Download first with `HF_HUB_DISABLE_XET=1 ~/vllm-env/bin/hf download cyankiwi/Qwen3.5-2B-AWQ-4bit`.
+
+Local vs cloud (`scripts/bench_models.py`, same prompts):
+
+| | qwen3.5-2b local | kimi-k3 (OpenRouter, reasoning off) |
+|---|---|---|
+| First token (FAQ) | **0.08 s** | ~1.0 s |
+| Full FAQ answer | 0.35 s | ~1.2 s |
+| Tool call | 0.77 s | ~1.0 s |
+| Arabic answer / tool call | ✓ / ✓ | ✓ / ✓ |
+
+Things adapted for a 2B model, which also help larger ones:
+- Booking tools are offered only when the conversation shows booking intent. Otherwise the model called `search_availability` for "is parking free?".
+- The handoff tool is offered only when the guest asks for a person or complains.
+- Hotel facts are given as plain lines, not JSON.
+- The tool loop always ends in words: the last round has no tools, and a repeated failing call stops tool use. An empty answer gets one retry, as a user-role note, because Qwen rejects late system messages.
+- Markdown is stripped from the stream.
+- After a quote or a handoff, the reply is a fixed localized template, not model text.
+
+Quality caveat: the 2B model makes word errors when it **translates** English-only facts into Arabic. Add hotel-approved Arabic/French versions of each fact (`PUT /v1/staff/properties/{slug}/facts/{key}` with `language`); approved translations are used verbatim. For higher quality, point `LLM_*` at a larger model (cloud, or a bigger GPU).
+
+WSL has only 7.9 GB of RAM, and the full stack (2× vLLM + Kokoro + API) pushes it into swap. Raise it in `%UserProfile%\.wslconfig` (`[wsl2]` then `memory=12GB`) if the host allows.
+
 ### Voice: why it feels immediate
 
 1. The browser runs its own voice activity detection. It keeps a 0.75 s pre-roll so the first syllable isn't lost, ends the utterance after 650 ms of silence, and sends a 16 kHz WAV.
@@ -61,7 +97,9 @@ POST /bookings/confirm  ◄── the only booking path: an explicit guest click
 4. While a tool runs, a localized status line ("Checking live availability…") is spoken, so there is no dead air.
 5. Barge-in: if the guest speaks over the agent, playback stops, the server cancels the turn, and the new utterance is processed.
 
-Measured locally with an RTX 3060 laptop GPU, Kokoro on CPU, and kimi-k3 via OpenRouter with `LLM_REASONING=off`:
+With the local stack (Qwen3-ASR + Qwen3.5-2B on the GPU, Kokoro on CPU), end of speech to **first audio is ~1.75–2.0 s**: transcript ~0.9 s, first sentence ~1.2–1.4 s.
+
+Earlier measurement with kimi-k3 via OpenRouter and `LLM_REASONING=off`:
 
 | End of speech → | API client (`smoke_live.py`) | Real browser, fake mic (`smoke_voice_browser.py`) |
 |---|---|---|

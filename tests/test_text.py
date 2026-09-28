@@ -62,3 +62,11 @@ def test_noise_transcripts_are_rejected():
     assert plausible_transcript("Hi, can I know if you have an available room for tonight?", langs)
     assert plausible_transcript("هل يوجد موقف سيارات؟", langs)
     assert not plausible_transcript("هل يوجد موقف سيارات؟", ["en", "fr"])
+
+
+def test_markdown_is_stripped_across_tokens():
+    from app.agent.sentences import MarkdownFilter
+
+    f = MarkdownFilter()
+    tokens = ["I found:\n\n*", "*Sea View", " Room**\n- Total: 37", ",000 DZD\n## Next\n", "check_in stays"]
+    assert "".join(f.feed(t) for t in tokens) == "I found:\n\nSea View Room\nTotal: 37,000 DZD\nNext\ncheck_in stays"
