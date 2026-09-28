@@ -1,5 +1,7 @@
 # Hotel Agent
 
+
+Architecture, data flows, and the scalability assessment with load-test results: [ARCHITECTURE.md](ARCHITECTURE.md).
 A multilingual AI front desk for hotels. It answers guests from approved hotel information, searches live availability, shows exact terms, and books after the guest presses **Confirm**. It also talks by voice with sequenced streaming and hands the conversation to staff at any point. The core is headless: the embeddable widget, the staff inbox, and any external system all use the same API.
 
 Product spec: `../CustomerSupport/HOTEL_AI_AGENT_PRODUCT_PLAN.md`. Build plan: `../CustomerSupport/HOTEL_AGENT_BUILD_PLAN.md`.
